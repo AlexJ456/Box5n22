@@ -33,9 +33,8 @@
   --countdown: #fdba74;
   --complete: #fcd34d;
 
-  /* live, written from JS during a session */
+  /* live, written once per phase by ui/ring.js */
   --phase-color: #f97316;
-  --phase-rgb: 249, 115, 22;
 
   /* global brightness, 0.25 – 1 */
   --lum: 1;
@@ -759,6 +758,11 @@ input[type="range"]::-moz-range-thumb {
 
 /* ==========================================================================
    Ring
+
+   Nothing in here moves on its own. During a session ui/ring.js drives every
+   transform and opacity below with one Web Animations API animation per phase,
+   so the movement runs on the compositor instead of being repainted here. The
+   values in this file are only the at-rest state.
    ========================================================================== */
 
 .ring {
@@ -767,47 +771,58 @@ input[type="range"]::-moz-range-thumb {
   aspect-ratio: 1;
   display: grid;
   place-items: center;
+  /* Every coloured layer reads these. ui/ring.js sets them per layer, so this
+     phase's colour and the next one's can be on screen at the same time. */
+  --c: var(--phase-color);
+  --c-rgb: 249, 115, 22;
 }
 
-.ring__svg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  transform: rotate(-90deg);
-  overflow: visible;
-}
-
-.ring__track {
-  fill: none;
-  stroke: var(--line-soft);
-  stroke-width: 1;
-}
-
+/* The track, and the arc that sweeps round it. Inset so the circle sits where
+   the old SVG one did (r = 112 in a 240 box). */
+.ring__track,
 .ring__arc {
-  fill: none;
-  stroke: var(--phase-color);
-  stroke-width: 2;
-  stroke-linecap: round;
-  opacity: 0.9;
+  position: absolute;
+  inset: 3%;
+  border-radius: 50%;
 }
 
-/* The part that actually breathes. The scale and fade below are only the
-   at-rest state: during a session ui/ring.js drives transform and opacity with
-   one Web Animations API animation per phase, so the movement runs on the
-   compositor instead of being recomputed here on every frame. */
+.ring__track { border: 1px solid var(--line-soft); }
+
+/* The arc is two halves, each a clip box holding a full circle whose top and
+   right borders are the only coloured ones — a half ring. Rotating that inside
+   the clip is the sweep, and rotation is something the compositor owns. The
+   rest positions here match ARC_RIGHT / ARC_LEFT in ui/ring.js: each half-ring
+   starts wholly on the far side of its clip, out of sight. */
+.ring__arc-half {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 50%;
+  overflow: hidden;
+}
+.ring__arc-half--r { right: 0; }
+.ring__arc-half--l { left: 0; }
+
+.ring__arc-fill {
+  position: absolute;
+  top: 0;
+  width: 200%;
+  height: 100%;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--phase-color);
+  border-right-color: var(--phase-color);
+  will-change: transform;
+}
+.ring__arc-half--r .ring__arc-fill { left: -100%; transform: rotate(-135deg); }
+.ring__arc-half--l .ring__arc-fill { left: 0; transform: rotate(45deg); }
+
+/* The part that actually breathes. The container scales; its layers carry the
+   colour. */
 .ring__orb {
   position: absolute;
   width: 78%;
   aspect-ratio: 1;
-  border-radius: 50%;
-  border: 1px solid var(--phase-color);
-  background: radial-gradient(
-    circle at 50% 50%,
-    rgba(var(--phase-rgb), 0.16) 0%,
-    rgba(var(--phase-rgb), 0.05) 55%,
-    rgba(var(--phase-rgb), 0) 72%
-  );
   transform: scale(0.46);
   will-change: transform;
 }
@@ -816,17 +831,47 @@ input[type="range"]::-moz-range-thumb {
   position: absolute;
   width: 130%;
   aspect-ratio: 1;
-  border-radius: 50%;
-  background: radial-gradient(
-    circle at 50% 50%,
-    rgba(var(--phase-rgb), 0.13) 0%,
-    rgba(var(--phase-rgb), 0) 62%
-  );
   opacity: 0.35;
   transform: scale(0.7);
   will-change: transform, opacity;
   pointer-events: none;
 }
+
+/* Colour layers. The orb and the glow each hold a pair, one in this phase's
+   colour and one in the next, and the drift between them is an opacity
+   crossfade — the colour is never repainted mid-phase, only faded. */
+.ring__fill,
+.ring__edge {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  will-change: opacity;
+}
+
+.ring__fill--orb {
+  background: radial-gradient(
+    circle at 50% 50%,
+    rgba(var(--c-rgb), 0.16) 0%,
+    rgba(var(--c-rgb), 0.05) 55%,
+    rgba(var(--c-rgb), 0) 72%
+  );
+}
+
+/* The orb's hairline edge, on layers of its own: it is opaque, so it has to
+   blend differently from the gradients (see ui/ring.js). */
+.ring__edge { border: 1px solid var(--c); }
+
+.ring__fill--glow {
+  background: radial-gradient(
+    circle at 50% 50%,
+    rgba(var(--c-rgb), 0.13) 0%,
+    rgba(var(--c-rgb), 0) 62%
+  );
+}
+
+/* At rest only the first of each pair shows. */
+.ring__fill + .ring__fill,
+.ring__edge + .ring__edge { opacity: 0; }
 
 .ring__label {
   position: relative;
