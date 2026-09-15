@@ -1,8 +1,11 @@
 /* ==========================================================================
    Breathe — design tokens
-   Every colour here already existed in the previous build. Phase is encoded
-   by luminance along the amber ramp: brightness peaks at the top of the
-   breath (lungs full) and troughs at the bottom.
+   Every colour here already existed in the previous build. The breathing
+   guide is a single colour; brightness still peaks at the top of the breath
+   (lungs full) and troughs at the bottom, but it is carried by opacity on
+   the orb and glow rather than by swapping one amber for a darker one. Two
+   of those darker ambers sat under 4.5:1 on this black ground, and vanished
+   outright once sleep mode dimmed the app.
    ========================================================================== */
 
 :root {
@@ -25,16 +28,10 @@
   --accent: #f59e0b;
   --field: #78350f;
 
-  /* phases */
+  /* the breath: one colour, for the ring, the arc, the label and the dots */
   --ph-inhale: #f97316;
-  --ph-hold: #fbbf24;
-  --ph-exhale: #b45309;
-  --ph-wait: #78350f;
   --countdown: #fdba74;
   --complete: #fcd34d;
-
-  /* live, written once per phase by ui/ring.js */
-  --phase-color: #f97316;
 
   /* global brightness, 0.25 – 1 */
   --lum: 1;
@@ -838,6 +835,12 @@ input[type="range"]::-moz-range-thumb {
    transform and opacity below with one Web Animations API animation per phase,
    so the movement runs on the compositor instead of being repainted here. The
    values in this file are only the at-rest state.
+
+   Nothing in here changes colour either. The guide is one colour throughout a
+   session — which phase you are in is the shape of the orb, not its hue — so
+   the only thing that has to stay in step with ui/ring.js is the at-rest
+   opacity of the orb and the glow, each matching the bottom of its own fade
+   range there.
    ========================================================================== */
 
 .ring {
@@ -846,9 +849,9 @@ input[type="range"]::-moz-range-thumb {
   aspect-ratio: 1;
   display: grid;
   place-items: center;
-  /* Every coloured layer reads these. ui/ring.js sets them per layer, so this
-     phase's colour and the next one's can be on screen at the same time. */
-  --c: var(--phase-color);
+  /* The one colour of the guide, as a hex and as a bare triple for the
+     gradients' rgba(). Nothing writes these at runtime. */
+  --c: var(--ph-inhale);
   --c-rgb: 249, 115, 22;
 }
 
@@ -885,68 +888,50 @@ input[type="range"]::-moz-range-thumb {
   height: 100%;
   border-radius: 50%;
   border: 2px solid transparent;
-  border-top-color: var(--phase-color);
-  border-right-color: var(--phase-color);
+  border-top-color: var(--c);
+  border-right-color: var(--c);
   will-change: transform;
 }
 .ring__arc-half--r .ring__arc-fill { left: -100%; transform: rotate(-135deg); }
 .ring__arc-half--l .ring__arc-fill { left: 0; transform: rotate(45deg); }
 
-/* The part that actually breathes. The container scales; its layers carry the
-   colour. */
+/* The part that actually breathes: a soft wash inside a hairline edge. It
+   scales and brightens toward the top of the breath. The 0.62 is ORB_FADE[0]
+   in ui/ring.js — the at-rest frame before the first phase is scheduled. */
 .ring__orb {
   position: absolute;
   width: 78%;
   aspect-ratio: 1;
-  transform: scale(0.46);
-  will-change: transform;
-}
-
-.ring__glow {
-  position: absolute;
-  width: 130%;
-  aspect-ratio: 1;
-  opacity: 0.35;
-  transform: scale(0.7);
-  will-change: transform, opacity;
-  pointer-events: none;
-}
-
-/* Colour layers. The orb and the glow each hold a pair, one in this phase's
-   colour and one in the next, and the drift between them is an opacity
-   crossfade — the colour is never repainted mid-phase, only faded. */
-.ring__fill,
-.ring__edge {
-  position: absolute;
-  inset: 0;
   border-radius: 50%;
-  will-change: opacity;
-}
-
-.ring__fill--orb {
+  border: 1px solid var(--c);
   background: radial-gradient(
     circle at 50% 50%,
     rgba(var(--c-rgb), 0.16) 0%,
     rgba(var(--c-rgb), 0.05) 55%,
     rgba(var(--c-rgb), 0) 72%
   );
+  opacity: 0.62;
+  transform: scale(0.46);
+  will-change: transform, opacity;
 }
 
-/* The orb's hairline edge, on layers of its own: it is opaque, so it has to
-   blend differently from the gradients (see ui/ring.js). */
-.ring__edge { border: 1px solid var(--c); }
-
-.ring__fill--glow {
+/* The halo around it. No edge, and it fades far deeper than the orb does —
+   0.35 is FADE[0] in ui/ring.js. */
+.ring__glow {
+  position: absolute;
+  width: 130%;
+  aspect-ratio: 1;
+  border-radius: 50%;
   background: radial-gradient(
     circle at 50% 50%,
     rgba(var(--c-rgb), 0.13) 0%,
     rgba(var(--c-rgb), 0) 62%
   );
+  opacity: 0.35;
+  transform: scale(0.7);
+  will-change: transform, opacity;
+  pointer-events: none;
 }
-
-/* At rest only the first of each pair shows. */
-.ring__fill + .ring__fill,
-.ring__edge + .ring__edge { opacity: 0; }
 
 .ring__label {
   position: relative;
@@ -960,8 +945,7 @@ input[type="range"]::-moz-range-thumb {
   font-size: clamp(1.1rem, 4.6vw, 1.35rem);
   letter-spacing: 0.2em;
   text-transform: lowercase;
-  color: var(--phase-color);
-  transition: color 700ms linear;
+  color: var(--c);
 }
 
 .ring__count {
@@ -998,13 +982,13 @@ input[type="range"]::-moz-range-thumb {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--dot-color, var(--ink-3));
+  background: var(--ph-inhale);
   transform: scale(1);
   transition: transform 400ms var(--ease), box-shadow 400ms var(--ease);
 }
 .dot.is-active .dot__mark {
   transform: scale(1.5);
-  box-shadow: 0 0 12px var(--dot-color, var(--ink-3));
+  box-shadow: 0 0 12px var(--ph-inhale);
 }
 
 .dot__label {
@@ -1013,7 +997,9 @@ input[type="range"]::-moz-range-thumb {
   text-transform: uppercase;
   color: var(--ink-3);
 }
-.dot.is-active .dot__label { color: var(--dot-color, var(--ink-2)); }
+/* The label stays neutral. The mark is already orange, glowing and half again
+   its size — a third orange thing in the row only makes it louder. */
+.dot.is-active .dot__label { color: var(--ink-2); }
 
 /* ==========================================================================
    Complete
@@ -1278,6 +1264,9 @@ input[type="range"]::-moz-range-thumb {
    `animation-duration` override only applies to CSS animations. ui/ring.js
    checks for this class itself and animates opacity at a fixed scale — these
    two rules are its at-rest state. */
+/* The 0.35 here is deliberate and is not the 0.62 on `.ring__orb` above: with
+   no scale to carry the breath this branch fades the orb as deeply as the glow,
+   so it matches FADE[0] rather than ORB_FADE[0]. It wins on specificity. */
 .reduce-motion .ring__orb {
   transform: scale(0.86);
   opacity: 0.35;

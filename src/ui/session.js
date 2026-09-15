@@ -1,5 +1,5 @@
 import { el, icon, mmss } from '../dom.js';
-import { getExercise, ladderRungs, endKind, PHASE_COLORS, num } from '../exercises.js';
+import { getExercise, ladderRungs, endKind, num } from '../exercises.js';
 import { createRing } from './ring.js';
 import * as audio from '../audio.js';
 import * as voice from '../voice.js';
@@ -49,7 +49,7 @@ export function session(app, props) {
   const ring = createRing({ showCountdown: settings.countdown });
 
   const dots = phases.map((phase) =>
-    el('div', { class: 'dot', style: { '--dot-color': PHASE_COLORS[phase.kind] } }, [
+    el('div', { class: 'dot' }, [
       el('div', { class: 'dot__mark' }),
       el('div', { class: 'dot__label' }, phase.name)
     ])
@@ -145,10 +145,8 @@ export function session(app, props) {
     ring.setPhaseName(phase.name);
     // Seeked, not restarted — this is equally a phase starting, a resumed
     // session picking back up, and a backgrounded one snapping to where the
-    // clock says it should be. The next phase's kind is what the colour
-    // drifts towards over this one.
-    const next = phases[(index + 1) % phases.length];
-    ring.setPhase(phase.kind, next.kind, phase.duration * 1000, phaseElapsed * 1000, engine.paused);
+    // clock says it should be.
+    ring.setPhase(phase.kind, phase.duration * 1000, phaseElapsed * 1000, engine.paused);
     dots.forEach((dot, i) => dot.classList.toggle('is-active', i === index));
 
     // `initial` opens the session, `resynced` is it coming back from a pause or
