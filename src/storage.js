@@ -3,6 +3,8 @@
  * leaves the device.
  */
 
+import { CUSTOM_KINDS, LADDER_LIMITS } from './exercises.js';
+
 const SETTINGS_KEY = 'breathe.settings.v1';
 const HISTORY_KEY = 'breathe.history.v1';
 const LEGACY_SETTINGS_KEY = 'breathingExercisesSettings';
@@ -22,7 +24,7 @@ export const DEFAULTS = {
   phaseTime: 4,        // Box Breathing
   coherentTime: 5,     // Coherent Breathing
   exhaleDuration: 6,   // Long Exhale
-  sound: 'off',        // 'off' | 'chime' | 'ambient'
+  sound: 'off',        // 'off' | 'chime' | 'ambient' | 'voice'
   // Session length, remembered per exercise. Box and Box Extreme are both
   // time-based, so keying this off the mode alone meant setting one silently
   // moved the other. `lastMinutes`/`lastRounds` survive as the fallback for an
@@ -32,6 +34,8 @@ export const DEFAULTS = {
   lastMinutes: 0,      // 0 = open-ended
   lastRounds: 0,       // 0 = open-ended
   phaseInput: 'list',  // how the phase-time sheet picks: 'list' | 'slider'
+  custom: { in: 4, hold: 4, out: 6, wait: 0 },   // the Custom pattern, seconds; 0 skips a hold
+  ladder: { on: false, to: 6, step: 1, minutes: 2 }, // Box only: rise `step`s every `minutes` up to `to`
   countdown: false,
   haptics: false,
   sleepMode: true,
@@ -96,6 +100,8 @@ export function sanitizeSettings(input) {
   // the type check unexamined, and the spread from DEFAULTS aliases one empty
   // object into every settings instance ever sanitized. Rebuild it instead.
   settings.lengths = sanitizeLengths(base.lengths);
+  settings.custom = sanitizeCustom(base.custom);
+  settings.ladder = sanitizeLadder(base.ladder);
 
   // One-time migration, safe to delete once installs have turned over.
   // Coherent used to share Box's `phaseTime`. Carry the value across when it
@@ -111,7 +117,7 @@ export function sanitizeSettings(input) {
   // Guard the ranged values in case the stored copy was hand-edited.
   settings.brightness = clamp(settings.brightness, 0.25, 1);
   settings.dimFloor = clamp(settings.dimFloor, 0.15, 1);
-  if (!['off', 'chime', 'ambient'].includes(settings.sound)) settings.sound = 'off';
+  if (!['off', 'chime', 'ambient', 'voice'].includes(settings.sound)) settings.sound = 'off';
   if (!['list', 'slider'].includes(settings.phaseInput)) settings.phaseInput = 'list';
   return settings;
 }
@@ -145,6 +151,34 @@ function sanitizeLengths(input) {
     out[id] = clamp(Math.round(value), 0, 999);
   }
   return out;
+}
+
+/** Each slot clamped to its own range from CUSTOM_KINDS, whole seconds. */
+function sanitizeCustom(input) {
+  const src = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+  const out = {};
+  for (const slot of CUSTOM_KINDS) {
+    const value = src[slot.key];
+    out[slot.key] = typeof value === 'number' && Number.isFinite(value)
+      ? clamp(Math.round(value), slot.min, slot.max)
+      : DEFAULTS.custom[slot.key];
+  }
+  return out;
+}
+
+/** `to` on a half-second grid, `step` one of the offered sizes, whole minutes. */
+function sanitizeLadder(input) {
+  const src = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+  const d = DEFAULTS.ladder;
+  const number = (v) => typeof v === 'number' && Number.isFinite(v);
+  return {
+    on: src.on === true,
+    to: number(src.to) ? clamp(Math.round(src.to * 2) / 2, LADDER_LIMITS.to[0], LADDER_LIMITS.to[1]) : d.to,
+    step: LADDER_LIMITS.steps.includes(src.step) ? src.step : d.step,
+    minutes: number(src.minutes)
+      ? clamp(Math.round(src.minutes), LADDER_LIMITS.minutes[0], LADDER_LIMITS.minutes[1])
+      : d.minutes
+  };
 }
 
 /* -------------------------------------------------------------------------

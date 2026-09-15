@@ -270,6 +270,22 @@ h1, h2, h3 { margin: 0; font-weight: 500; letter-spacing: -0.01em; }
 
 .chip .icon { width: 18px; height: 18px; flex: none; }
 
+/* Narrow phones. The row has to hold the length, a value chip as wide as
+   "4→8s", and three squares. Below 400px the clock icon goes — the label
+   says it all — and below 340px (an original SE) the squares tighten up. */
+@media (max-width: 400px) {
+  .chip:not(.chip--wide):not(.chip--value) { flex-basis: 46px; }
+  .chip--wide .icon { display: none; }
+  .chip--wide { padding: 0 12px; }
+}
+@media (max-width: 340px) {
+  .quick { gap: 4px; }
+  .chip { min-height: 46px; }
+  .chip:not(.chip--wide):not(.chip--value) { flex-basis: 42px; }
+  .chip--wide, .chip--value { padding: 0 10px; }
+  .chip__label { font-size: 0.86rem; }
+}
+
 .chip__label {
   font-size: 0.92rem;
   letter-spacing: 0.02em;
@@ -344,15 +360,20 @@ h1, h2, h3 { margin: 0; font-weight: 500; letter-spacing: -0.01em; }
   margin: 0 0 0 2px;
 }
 
-.sheet__list {
-  display: flex;
-  flex-direction: column;
-  max-height: 62vh;
+/* The body scrolls, not the list: a sheet can carry a block under its rows
+   (the Box ladder) and the whole thing has to stay reachable on a short phone. */
+.sheet__body {
+  max-height: min(70vh, 640px);
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: none;
 }
-.sheet__list::-webkit-scrollbar { display: none; }
+.sheet__body::-webkit-scrollbar { display: none; }
+
+.sheet__list {
+  display: flex;
+  flex-direction: column;
+}
 
 .sheet__row {
   display: flex;
@@ -368,9 +389,51 @@ h1, h2, h3 { margin: 0; font-weight: 500; letter-spacing: -0.01em; }
 }
 .sheet__row:last-child { border-bottom: none; }
 .sheet__row[aria-pressed="true"] { color: var(--accent); }
+.sheet__row:disabled { opacity: 0.45; cursor: default; }
 .sheet__row .icon { width: 19px; height: 19px; color: var(--accent); }
 
-.sheet__label { flex: 1; }
+.sheet__label { flex: 1; min-width: 0; }
+.sheet__row-note { font-size: 0.76rem; color: var(--ink-3); margin-top: 2px; }
+
+/* a block under the rows: the Box ladder, the Done under the custom pattern */
+.sheet__section {
+  border-top: 1px solid var(--line-soft);
+  margin-top: 6px;
+  padding-top: 4px;
+}
+.sheet__section .btn { width: 100%; margin-top: 14px; }
+
+.sheet__note {
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: var(--ink-3);
+  padding: 10px 2px 4px;
+}
+
+/* −/+ stepper row (ui/controls.js) */
+.stepper { gap: 8px; }
+.stepper__body { flex: 1; min-width: 0; }
+.stepper__value {
+  min-width: 4.5ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.stepper__btn {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  font-size: 1.25rem;
+  line-height: 1;
+  transition: background 200ms var(--ease), opacity 200ms var(--ease);
+}
+.stepper__btn:hover { background: var(--card); }
+.stepper__btn:disabled { opacity: 0.3; cursor: default; }
 
 .sheet__row--custom { gap: 10px; }
 
@@ -704,6 +767,18 @@ input[type="range"]::-moz-range-thumb {
 .seg button[aria-pressed="true"] {
   background: rgba(245, 158, 11, 0.18);
   color: var(--accent);
+}
+.seg button:disabled { opacity: 0.4; cursor: default; }
+
+/* full-width, buttons sharing the row equally (the four-way sound control) */
+.seg--fill { width: 100%; }
+.seg--fill button { flex: 1; padding: 0 6px; }
+
+/* words above, control below — for a control too wide to sit beside them */
+.row--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
 }
 
 /* ==========================================================================

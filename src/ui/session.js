@@ -1,7 +1,8 @@
 import { el, icon, mmss } from '../dom.js';
-import { getExercise, getPhases, endKind, PHASE_COLORS, num } from '../exercises.js';
+import { getExercise, ladderRungs, endKind, PHASE_COLORS, num } from '../exercises.js';
 import { createRing } from './ring.js';
 import * as audio from '../audio.js';
+import * as voice from '../voice.js';
 import * as haptics from '../haptics.js';
 import * as wakelock from '../wakelock.js';
 import { recordSession } from '../storage.js';
@@ -9,34 +10,29 @@ import { endTimeFor } from '../engine.js';
 
 const SLEEP_DELAY = 20000;
 
-/**
- * How often the engine wakes between the moments that change something on
- * screen. Only the ambient pad needs it: `audio.follow` smooths between writes
- * but wants a fresh one every hundred milliseconds or so. With any other sound
- * setting the engine sleeps until the next second, digit or phase boundary.
- */
-const AMBIENT_TICK = 0.1;
-
 export function session(app, props) {
   const { settings } = app;
   const exercise = getExercise(props.exerciseId);
-  const phases = getPhases(props.exerciseId, settings);
+  // One rung for an ordinary session; one per rise for a Box ladder. The
+  // phase names never change between rungs, only the durations, so the first
+  // rung is enough for anything that only needs the names.
+  const rungs = ladderRungs(props.exerciseId, settings);
+  const phases = rungs[0].phases;
 
   // One config, handed to both the HUD and the engine, so what the countdown
   // promises and what the session actually does cannot drift apart.
   const config = {
-    phases,
+    rungs,
     mode: exercise.mode,
     limitSeconds: props.limitMinutes ? props.limitMinutes * 60 : 0,
     targetRounds: props.targetRounds || 0,
-    endKind: endKind(props.exerciseId),
-    tick: settings.sound === 'ambient' ? AMBIENT_TICK : 0
+    endKind: endKind(props.exerciseId)
   };
 
   // What the HUD counts towards: the real end, not the limit. The session
   // always finishes the breath it is on, so these differ by up to a cycle.
   // Infinity for an open-ended session.
-  const endsAt = endTimeFor(phases, config);
+  const endsAt = endTimeFor(rungs, config);
   const targetRounds = config.targetRounds;
   const isRounds = exercise.mode === 'rounds';
 
@@ -119,8 +115,9 @@ export function session(app, props) {
 
   // The breath itself is not here: it is a set of compositor animations per
   // phase, handed to the ring at the boundary — scale, glow, arc and colour
-  // alike. This runs on the engine's coarse tick and only touches things that
-  // change at human speed.
+  // alike — and the ambient pad is a set of curves on the audio clock, handed
+  // over at the same moment. This runs on the engine's coarse tick and only
+  // touches things that change at human speed.
   function onFrame(f) {
     if (settings.countdown) ring.setCountdown(num(f.countdown));
 
@@ -133,8 +130,6 @@ export function session(app, props) {
       lastHud = label;
       hudTime.textContent = label;
     }
-
-    audio.follow(f.breath, f.phase.kind);
   }
 
   function onPhase({ index, phase, phaseElapsed, isFinal, initial, skipped, resynced }) {
@@ -160,7 +155,18 @@ export function session(app, props) {
     // the background, and `skipped` counts boundaries that went by unseen while
     // it was away. None has earned a cue — otherwise a couple of minutes in
     // another app come back as a burst of chimes.
-    if (initial || resynced || skipped > 0) return;
+    const crossed = !initial && !resynced && skipped === 0;
+
+    // The pad gets every phase event, cue or not: it has to be seeked exactly
+    // like the ring. Only a crossed boundary earns the swell.
+    audio.phase(phase.kind, phase.duration, phaseElapsed, crossed);
+
+    // Voice speaks the first phase and the one you resume into as well — with
+    // eyes closed, that is exactly when you want telling where you are — but
+    // never the ones that went by unseen.
+    if (settings.sound === 'voice' && skipped === 0 && !engine.paused) voice.say(phase.name);
+
+    if (!crossed) return;
     audio.phaseCue(phase.kind);
     haptics.phase();
   }
@@ -184,6 +190,7 @@ export function session(app, props) {
     engine.pause();
     ring.setPaused(true);
     audio.stop();
+    voice.stop();
     primaryBtn.replaceChildren(icon('play'), el('span', {}, 'Resume'));
     wakelock.release();
   }
@@ -259,6 +266,7 @@ export function session(app, props) {
       window.removeEventListener('keydown', onKey);
       document.removeEventListener('visibilitychange', onVisibility);
       audio.stop();
+      voice.stop();
       haptics.stop();
       wakelock.release();
       app.setBrightness(settings.brightness);

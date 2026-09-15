@@ -1,16 +1,22 @@
 import { el, icon } from '../dom.js';
 import { openSheet } from './sheet.js';
+import { toggle, segmented, stepper } from './controls.js';
 
 import {
   EXERCISE_IDS,
+  CUSTOM_KINDS,
+  LADDER_LIMITS,
   getExercise,
   patternLabel,
   sliderValue,
+  sliderSteps,
+  ladderInfo,
   num,
   TIME_PRESETS,
   ROUND_PRESETS
 } from '../exercises.js';
 import * as audio from '../audio.js';
+import * as voice from '../voice.js';
 
 export function home(app) {
   const { settings } = app;
@@ -121,14 +127,6 @@ export function home(app) {
    * 4.5–6 by halves, Long Exhale 6–8), so the sheet lists them rather than
    * offering a slider — easier to hit and consistent with session length.
    */
-  function sliderSteps(spec) {
-    const out = [];
-    for (let v = spec.min; v <= spec.max + 1e-9; v += spec.step) {
-      out.push(Math.round(v * 100) / 100);
-    }
-    return out;
-  }
-
   function applyPhase(spec, value) {
     settings[spec.setting] = value;
     app.save();
@@ -141,7 +139,7 @@ export function home(app) {
    * over raw seconds, so it can only ever land on a value the exercise
    * actually supports — including Coherent's half-seconds.
    */
-  function phaseSliderBody(spec, steps, sheet) {
+  function phaseSliderBody(spec, steps, sheet, onMove) {
     const current = sliderValue(getExercise(settings.exercise), settings);
     const readout = el('div', { class: 'sheet__readout' }, `${num(current)}s`);
 
@@ -156,6 +154,7 @@ export function home(app) {
         const value = steps[Number(e.target.value)];
         readout.textContent = `${num(value)}s`;
         applyPhase(spec, value);
+        if (onMove) onMove();
       }
     });
 
@@ -174,6 +173,88 @@ export function home(app) {
     ]);
   }
 
+  /**
+   * The Box ladder, under the phase-time picker: a switch, and when it is on,
+   * where to rise to, by how much, and how often. Everything is applied as it
+   * is tapped; the note reads the result back in one line.
+   */
+  function ladderBlock(exercise, sheet) {
+    const L = settings.ladder;
+    const note = el('div', { class: 'sheet__note' });
+    const details = el('div', {});
+
+    function summary() {
+      const info = ladderInfo(exercise.id, settings);
+      if (!info) {
+        const start = sliderValue(exercise, settings);
+        return `Rise to needs to be above the ${num(start)}s phase time.`;
+      }
+      return `${num(info.start)}s → ${num(info.to)}s, +${num(info.step)}s every ` +
+        `${info.minutes} min · about ${info.steps * info.minutes} min to the top. ` +
+        'Each rise waits for the end of a full cycle.';
+    }
+
+    function refresh() {
+      details.hidden = !L.on;
+      note.textContent = summary();
+    }
+
+    function commit() {
+      app.save();
+      refresh();
+      renderQuick();
+    }
+
+    const to = stepper({
+      label: 'Rise to',
+      value: L.to,
+      min: LADDER_LIMITS.to[0],
+      max: LADDER_LIMITS.to[1],
+      step: 0.5,
+      format: (v) => `${num(v)}s`,
+      onChange: (v) => { L.to = v; commit(); }
+    });
+
+    const step = el('div', { class: 'sheet__row' }, [
+      el('div', { class: 'sheet__label' }, 'Step'),
+      segmented(
+        LADDER_LIMITS.steps.map((v) => ({ value: v, label: `${num(v)}s` })),
+        L.step,
+        (v) => { L.step = v; commit(); }
+      )
+    ]);
+
+    const every = stepper({
+      label: 'Every',
+      value: L.minutes,
+      min: LADDER_LIMITS.minutes[0],
+      max: LADDER_LIMITS.minutes[1],
+      step: 1,
+      format: (v) => `${v} min`,
+      onChange: (v) => { L.minutes = v; commit(); }
+    });
+
+    const head = el('div', { class: 'sheet__row' }, [
+      el('div', { class: 'sheet__label' }, [
+        el('div', {}, 'Ladder'),
+        el('div', { class: 'row__note' }, 'Phase time rises over the session')
+      ]),
+      toggle(L.on, (on) => { L.on = on; commit(); })
+    ]);
+
+    details.append(to.el, step, every.el, note);
+    refresh();
+
+    return {
+      el: el('div', { class: 'sheet__section' }, [
+        head,
+        details,
+        el('button', { class: 'btn', type: 'button', onclick: () => sheet.close() }, 'Done')
+      ]),
+      refresh
+    };
+  }
+
   function openPhaseSheet() {
     const exercise = getExercise(settings.exercise);
     const spec = exercise.slider;
@@ -181,6 +262,17 @@ export function home(app) {
 
     const steps = sliderSteps(spec);
     let sheet;
+    let ladder = null;
+
+    // Box carries the ladder block under either picker; the list closes the
+    // sheet on a pick as usual, and the block has its own Done.
+    function body(mode) {
+      const picker = mode === 'slider'
+        ? phaseSliderBody(spec, steps, sheet, () => ladder && ladder.refresh())
+        : sheet.list;
+      if (!ladder) return mode === 'slider' ? picker : null;
+      return el('div', {}, [picker, ladder.el]);
+    }
 
     // Two ways to pick the same value; which one you prefer is remembered.
     const modes = [['list', 'List'], ['slider', 'Slider']];
@@ -196,7 +288,7 @@ export function home(app) {
             buttons.forEach((b, i) =>
               b.setAttribute('aria-pressed', String(modes[i][0] === mode))
             );
-            sheet.setBody(mode === 'slider' ? phaseSliderBody(spec, steps, sheet) : null);
+            sheet.setBody(body(mode));
           }
         },
         label
@@ -214,9 +306,46 @@ export function home(app) {
       }
     });
 
-    if (settings.phaseInput === 'slider') {
-      sheet.setBody(phaseSliderBody(spec, steps, sheet));
-    }
+    if (exercise.ladder) ladder = ladderBlock(exercise, sheet);
+    const initial = body(settings.phaseInput);
+    if (initial) sheet.setBody(initial);
+  }
+
+  /* --------------------------------------------------------- custom pattern */
+
+  /** Four steppers, one per slot. A hold or wait at 0 reads "off" and is skipped. */
+  function openCustomSheet() {
+    let sheet;
+    const rows = CUSTOM_KINDS.map((slot) =>
+      stepper({
+        label: slot.name,
+        value: settings.custom[slot.key],
+        min: slot.min,
+        max: slot.max,
+        step: 1,
+        format: (v) => (v > 0 ? `${v}s` : 'off'),
+        onChange: (v) => {
+          settings.custom[slot.key] = v;
+          app.save();
+          renderList();
+          renderQuick();
+        }
+      }).el
+    );
+
+    sheet = openSheet({
+      title: 'Pattern',
+      value: null,
+      options: [],
+      onSelect: () => {},
+      body: el('div', {}, [
+        ...rows,
+        el('div', { class: 'sheet__note' }, 'Turn Hold or Wait down to off to leave them out.'),
+        el('div', { class: 'sheet__section' }, [
+          el('button', { class: 'btn', type: 'button', onclick: () => sheet.close() }, 'Done')
+        ])
+      ])
+    });
   }
 
   /* --------------------------------------------------------------- length  */
@@ -265,7 +394,7 @@ export function home(app) {
    */
   function renderQuick() {
     // Filtered, because replaceChildren stringifies null rather than skipping
-    // it — phaseChip() returns null for the exercises with no slider.
+    // it — phaseChip() returns null for the exercises with nothing to set.
     const children = [
       el(
         'button',
@@ -293,11 +422,11 @@ export function home(app) {
   }
 
   /**
-   * Sound is a three-way choice, so the chip opens a sheet like the other
+   * Sound is a four-way choice, so the chip opens a sheet like the other
    * value chips rather than toggling. The icon carries the current mode, so
    * it still reads at a glance without costing the row any width.
    */
-  const SOUND_ICON = { ambient: 'volume', chime: 'bell', off: 'volumeOff' };
+  const SOUND_ICON = { ambient: 'volume', chime: 'bell', voice: 'mic', off: 'volumeOff' };
 
   function soundChip() {
     const on = settings.sound !== 'off';
@@ -325,21 +454,54 @@ export function home(app) {
       options: [
         { value: 'ambient', label: 'Ambient — drone and soft chime' },
         { value: 'chime', label: 'Chime — a tone at each phase' },
+        {
+          value: 'voice',
+          label: 'Voice — spoken phase names',
+          disabled: !voice.supported,
+          note: voice.supported ? null : 'Not supported in this browser'
+        },
         { value: 'off', label: 'Mute' }
       ],
       onSelect: (value) => {
         if (!value) return;
         settings.sound = value;
         audio.setMode(value);
+        // Picking it is a tap, which is when iOS lets speech be unlocked.
+        if (value === 'voice') voice.prime();
         commit();
       }
     });
   }
 
-  /** Only the three sliderless exercises omit this. */
+  /**
+   * The chip beside the length: phase time for the slider exercises (reading
+   * "4→8s" while Box is laddered), the pattern editor for Custom, nothing for
+   * the fixed ones.
+   */
   function phaseChip() {
     const exercise = getExercise(settings.exercise);
+    if (exercise.custom) {
+      // An icon, not the pattern: the card already spells it out, and a long
+      // pattern would squeeze the length chip off a narrow phone.
+      return el(
+        'button',
+        {
+          class: 'chip',
+          type: 'button',
+          'data-chip': 'phase',
+          'aria-haspopup': 'dialog',
+          'aria-label': 'Edit pattern',
+          title: 'Edit pattern',
+          onclick: openCustomSheet
+        },
+        [icon('sliders')]
+      );
+    }
     if (!exercise.slider) return null;
+    const info = ladderInfo(exercise.id, settings);
+    const label = info
+      ? `${num(info.start)}→${num(info.to)}s`
+      : `${num(sliderValue(exercise, settings))}s`;
     return el(
       'button',
       {
@@ -351,7 +513,7 @@ export function home(app) {
         title: exercise.slider.label,
         onclick: openPhaseSheet
       },
-      [el('span', { class: 'chip__label' }, `${num(sliderValue(exercise, settings))}s`)]
+      [el('span', { class: 'chip__label' }, label)]
     );
   }
 
@@ -382,8 +544,10 @@ export function home(app) {
   }
 
   function start() {
-    // Creating the AudioContext inside the tap is what keeps Safari happy.
+    // Creating the AudioContext inside the tap is what keeps Safari happy, and
+    // the same goes for the first spoken word.
     audio.unlock();
+    if (settings.sound === 'voice') voice.prime();
     const exercise = getExercise(settings.exercise);
     app.go('session', {
       exerciseId: settings.exercise,

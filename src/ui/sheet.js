@@ -8,13 +8,15 @@ import { el, icon } from '../dom.js';
  *
  * @param {object}   opts
  * @param {string}   opts.title
- * @param {Array}    opts.options   [{ value, label }] — value null means "no limit"
+ * @param {Array}    opts.options   [{ value, label, disabled?, note? }] — value null means "no limit"
  * @param {*}        opts.value     the currently selected value
  * @param {object}   [opts.custom]  { placeholder, label } to show a free-entry row
  * @param {Node}     [opts.accessory] control shown on the title row, right-aligned
  * @param {Node}     [opts.body]    replaces the option rows entirely
  * @param {Function} opts.onSelect  called with the chosen value; the sheet then closes
- * @returns {{ close: Function, setBody: Function }} setBody(null) restores the rows
+ * @returns {{ close: Function, setBody: Function, list: HTMLElement }}
+ *   setBody(null) restores the rows; `list` is the rows node itself, so a
+ *   caller can compose a body around it and still swap it back.
  */
 export function openSheet({ title, options, value, custom, accessory, body, onSelect }) {
   let closing = false;
@@ -26,11 +28,15 @@ export function openSheet({ title, options, value, custom, accessory, body, onSe
       {
         class: 'sheet__row',
         type: 'button',
+        disabled: Boolean(option.disabled),
         'aria-pressed': String(selected),
         onclick: () => choose(option.value)
       },
       [
-        el('span', { class: 'sheet__label' }, option.label),
+        el('span', { class: 'sheet__label' }, [
+          option.label,
+          option.note ? el('div', { class: 'sheet__row-note' }, option.note) : null
+        ]),
         selected ? icon('check') : null
       ]
     );
@@ -125,6 +131,7 @@ export function openSheet({ title, options, value, custom, accessory, body, onSe
 
   return {
     close,
+    list,
     /** Swap the sheet's contents in place; null restores the option rows. */
     setBody: (node) => bodyWrap.replaceChildren(node || list)
   };

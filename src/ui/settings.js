@@ -1,45 +1,20 @@
 import { el, icon } from '../dom.js';
+import { toggle, segmented } from './controls.js';
 import * as audio from '../audio.js';
 import * as haptics from '../haptics.js';
+import * as voice from '../voice.js';
 
 function row(title, note, control, options = {}) {
-  return el('div', { class: `row${options.disabled ? ' row--disabled' : ''}` }, [
+  const classes = ['row'];
+  if (options.disabled) classes.push('row--disabled');
+  if (options.stack) classes.push('row--stack');
+  return el('div', { class: classes.join(' ') }, [
     el('div', { class: 'row__body' }, [
       el('div', { class: 'row__title' }, title),
       note ? el('div', { class: 'row__note' }, note) : null
     ]),
     control
   ]);
-}
-
-function toggle(checked, onChange, disabled) {
-  const input = el('input', {
-    type: 'checkbox',
-    checked,
-    disabled,
-    onchange: (e) => onChange(e.target.checked)
-  });
-  return el('label', { class: 'switch' }, [input, el('span', { class: 'switch__track' })]);
-}
-
-function segmented(options, value, onChange) {
-  const buttons = options.map((option) =>
-    el(
-      'button',
-      {
-        type: 'button',
-        'aria-pressed': String(option.value === value),
-        onclick: () => {
-          buttons.forEach((b, i) =>
-            b.setAttribute('aria-pressed', String(options[i].value === option.value))
-          );
-          onChange(option.value);
-        }
-      },
-      option.label
-    )
-  );
-  return el('div', { class: 'seg', role: 'group' }, buttons);
 }
 
 function rangeRow(label, note, value, spec, onInput) {
@@ -85,6 +60,10 @@ export function settings(app) {
   );
   dimRow.hidden = !s.sleepMode;
 
+  const soundNote = voice.supported
+    ? 'Ambient is a soft drone that follows the breath; Voice speaks each phase'
+    : 'Ambient is a soft drone that follows the breath. Voice needs speech synthesis, which this browser lacks';
+
   const root = el('div', { class: 'screen' }, [
     el('div', { class: 'topbar' }, [
       el(
@@ -99,23 +78,29 @@ export function settings(app) {
     el('div', { class: 'screen__scroll' }, [
       el('div', { class: 'section-label' }, 'During a session'),
       el('div', { class: 'rows' }, [
+        // Four options no longer fit beside the title on a narrow phone, so
+        // this row stacks: words above, the control full-width below.
         row(
           'Sound',
-          'Ambient is a soft drone that follows the breath',
+          soundNote,
           segmented(
             [
               { value: 'off', label: 'Off' },
               { value: 'chime', label: 'Chime' },
-              { value: 'ambient', label: 'Ambient' }
+              { value: 'ambient', label: 'Ambient' },
+              { value: 'voice', label: 'Voice', disabled: !voice.supported }
             ],
             s.sound,
             (value) => {
               s.sound = value;
               audio.unlock();
               audio.setMode(value);
+              if (value === 'voice') voice.prime();
               app.save();
-            }
-          )
+            },
+            { fill: true }
+          ),
+          { stack: true }
         ),
         row(
           'Countdown',
