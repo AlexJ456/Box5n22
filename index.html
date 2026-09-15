@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Breathe</title>
+<meta name="description" content="Breathing exercises for relaxation, focus, and wellbeing">
+
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Breathe">
+
+<link rel="apple-touch-icon" href="icons/icon-192x192.PNG">
+<link rel="icon" href="icons/icon-192x192.PNG">
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="app" class="app" aria-live="off">
+  <main id="view" class="view"></main>
+  <!-- Bedtime dimming. A black veil, not a filter on .app: the two are
+       identical over an opaque backdrop, but a root filter puts the whole app
+       behind a render surface that has to be reprocessed on every repaint of
+       the breathing orb. -->
+  <div class="app__dim" aria-hidden="true"></div>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,1165 @@
+/* ==========================================================================
+   Breathe — design tokens
+   Every colour here already existed in the previous build. Phase is encoded
+   by luminance along the amber ramp: brightness peaks at the top of the
+   breath (lungs full) and troughs at the bottom.
+   ========================================================================== */
+
+:root {
+  --bg: #000000;
+
+  /* text */
+  --ink: #ffedd5;
+  --ink-2: #fde68a;
+  --ink-3: #d97706;
+
+  /* structure */
+  --line: rgba(146, 64, 14, 0.55);      /* #92400e */
+  --line-soft: rgba(146, 64, 14, 0.28);
+  --card: rgba(249, 115, 22, 0.035);
+  --card-active: rgba(249, 115, 22, 0.10);
+
+  /* controls */
+  --ctl-a: #d97706;
+  --ctl-b: #b45309;
+  --accent: #f59e0b;
+  --field: #78350f;
+
+  /* phases */
+  --ph-inhale: #f97316;
+  --ph-hold: #fbbf24;
+  --ph-exhale: #b45309;
+  --ph-wait: #78350f;
+  --countdown: #fdba74;
+  --complete: #fcd34d;
+
+  /* live, written from JS during a session */
+  --phase-color: #f97316;
+  --phase-rgb: 249, 115, 22;
+
+  /* global brightness, 0.25 – 1 */
+  --lum: 1;
+
+  --col: 420px;
+  --r: 14px;
+  --ease: cubic-bezier(0.32, 0.72, 0.28, 1);
+
+  --sat: env(safe-area-inset-top, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+
+  --font: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Segoe UI',
+    Roboto, Arial, sans-serif;
+}
+
+/* ==========================================================================
+   Base
+   ========================================================================== */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+/* Hard scroll lock.
+   `overflow: hidden` alone does NOT stop iOS from rubber-banding the
+   document — only taking the body out of flow with `position: fixed` does.
+   Pinned to all four edges, there is no document scroll box at all, so
+   nothing can drift, bounce, or be dragged out of place. */
+body {
+  position: fixed;
+  inset: 0;
+  margin: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: var(--bg);
+  color: var(--ink-2);
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app {
+  /* svh, not dvh: size to the smallest viewport so the layout never reflows
+     as browser toolbars hide. In a standalone PWA the two are identical. */
+  height: 100svh;
+  display: flex;
+  justify-content: center;
+  padding: var(--sat) var(--sar) var(--sab) var(--sal);
+  position: relative;
+}
+
+/* Global bedtime dimming. #000 stays #000 at every level, so the OLED
+   background remains fully off.
+
+   A black veil rather than `filter: brightness(var(--lum))` on .app. The two
+   are arithmetically the same thing — compositing black at alpha `1 - lum` and
+   multiplying each channel by `lum` both land on `channel * lum` in sRGB — but
+   a filter on the root makes the entire app a render surface that has to be
+   reprocessed every time the breathing orb repaints. This is one flat layer the
+   compositor can hold on its own, which is most of why the session no longer
+   stutters in Low Power Mode. */
+.app__dim {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: calc(1 - var(--lum));
+  pointer-events: none;
+  transition: opacity 900ms var(--ease);
+}
+
+.view {
+  width: 100%;
+  max-width: var(--col);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  padding: 0 20px;
+}
+
+/* ==========================================================================
+   Typography
+   ========================================================================== */
+
+h1, h2, h3 { margin: 0; font-weight: 500; letter-spacing: -0.01em; }
+
+.title {
+  font-size: clamp(1.25rem, 5vw, 1.5rem);
+  color: var(--ink-2);
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  text-transform: lowercase;
+}
+
+.section-label {
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0 0 10px 2px;
+}
+
+.muted { color: var(--ink-3); }
+
+/* ==========================================================================
+   Screens
+   ========================================================================== */
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  animation: screen-in 420ms var(--ease) both;
+}
+
+@keyframes screen-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Locked by default — not `auto`. main.js measures after every render and
+   only adds .is-scrollable when the content genuinely does not fit, so on a
+   screen that fits there is no scroll box at all: nothing to drag, nothing
+   to bounce, not even a sub-pixel of travel.
+   `-webkit-overflow-scrolling: touch` is deliberately absent; it creates a
+   momentum layer that rubber-bands on iOS even with content that fits. */
+.screen__scroll,
+.done {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+.screen__scroll.is-scrollable,
+.done.is-scrollable { overflow-y: auto; }
+
+/* Content is usually far shorter than the pane, which otherwise leaves a dead
+   gap above the Start button. Centring balances it. :not(.is-scrollable)
+   matters — centring a container that does overflow makes its top
+   unreachable. */
+.screen__scroll:not(.is-scrollable) {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.screen__scroll::-webkit-scrollbar,
+.done::-webkit-scrollbar { display: none; }
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 0 18px;
+  flex: none;
+}
+
+.topbar__actions { display: flex; gap: 6px; }
+
+/* vertical rhythm between blocks on a scrolling screen */
+.block { margin-bottom: 22px; }
+.block:last-child { margin-bottom: 8px; }
+
+.home__foot {
+  flex: none;
+  padding: 14px 0 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* One row: session length (a value you read) then three toggles (things you
+   flip). The asymmetry is the point — it reads as hierarchy rather than as
+   four equal buttons, and it leaves only one control row on the screen. */
+.quick {
+  display: flex;
+  gap: 6px;
+}
+
+.chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  /* icon toggles are fixed squares; the value chips flex around them */
+  flex: 0 0 48px;
+  min-height: 48px;
+  padding: 0 6px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r);
+  background: var(--card);
+  color: var(--ink-3);
+  transition: border-color 200ms var(--ease), background 200ms var(--ease),
+    color 200ms var(--ease);
+}
+.chip:hover { border-color: var(--line); }
+
+.chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--card-active);
+  color: var(--accent);
+}
+
+.chip--wide {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-start;
+  padding: 0 13px;
+  color: var(--ink-2);
+}
+
+/* phase time — sized to its own value, e.g. "4.5s" */
+.chip--value {
+  flex: 0 0 auto;
+  padding: 0 14px;
+  color: var(--ink-2);
+}
+.chip--wide .icon { color: var(--ink-3); }
+
+.chip .icon { width: 18px; height: 18px; flex: none; }
+
+.chip__label {
+  font-size: 0.92rem;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ==========================================================================
+   Bottom sheet
+   ========================================================================== */
+
+.sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.sheet__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  transition: opacity 320ms var(--ease);
+}
+.sheet.is-open .sheet__backdrop { opacity: 1; }
+
+.sheet__panel {
+  position: relative;
+  width: 100%;
+  /* On the phone this is the full column; on a wide screen it stays a
+     dialog-sized panel rather than stretching into a bar. */
+  max-width: min(var(--col), 480px);
+  margin: 0 auto;
+  padding: 8px 20px calc(var(--sab) + 18px);
+  background: #0d0703;
+  border: 1px solid var(--line);
+  border-bottom: none;
+  border-radius: 22px 22px 0 0;
+  transform: translateY(100%);
+  transition: transform 320ms var(--ease);
+}
+.sheet.is-open .sheet__panel { transform: translateY(0); }
+
+.sheet__handle {
+  width: 38px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+  margin: 0 auto 14px;
+}
+
+.sheet__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+/* compact enough to sit on the title line */
+.seg--sheet button { min-height: 28px; padding: 0 11px; font-size: 0.78rem; }
+
+.sheet__title {
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0 0 0 2px;
+}
+
+.sheet__list {
+  display: flex;
+  flex-direction: column;
+  max-height: 62vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+.sheet__list::-webkit-scrollbar { display: none; }
+
+.sheet__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 52px;
+  padding: 0 2px;
+  text-align: left;
+  color: var(--ink-2);
+  font-size: 1rem;
+  border-bottom: 1px solid var(--line-soft);
+}
+.sheet__row:last-child { border-bottom: none; }
+.sheet__row[aria-pressed="true"] { color: var(--accent); }
+.sheet__row .icon { width: 19px; height: 19px; color: var(--accent); }
+
+.sheet__label { flex: 1; }
+
+.sheet__row--custom { gap: 10px; }
+
+/* slider alternative to the option rows */
+.sheet__slider { padding: 18px 2px 6px; }
+
+.sheet__range {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.sheet__readout {
+  font-size: 1.9rem;
+  font-weight: 300;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.sheet__scale {
+  font-size: 0.78rem;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.sheet__slider .btn { margin-top: 16px; width: 100%; }
+
+.sheet__input {
+  width: 84px;
+  min-width: 0;
+  text-align: center;
+  /* 16px keeps iOS from zooming the viewport on focus */
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  padding: 9px 8px;
+}
+.sheet__input::placeholder { color: var(--ink-3); opacity: 1; }
+.sheet__input:focus { outline: none; border-color: var(--accent); }
+
+.sheet__set {
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 10px;
+  background: linear-gradient(to bottom, var(--ctl-a), var(--ctl-b));
+  color: #1a0e03;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.range-block { padding: 10px 0 2px; }
+
+.footnote {
+  margin: 20px 0 12px;
+  font-size: 0.76rem;
+  line-height: 1.7;
+  color: var(--ink-3);
+  text-align: center;
+}
+
+.history__actions {
+  display: flex;
+  gap: 8px;
+  margin: 18px 0 12px;
+}
+.history__actions .btn { flex: 1; }
+
+/* ==========================================================================
+   Buttons
+   ========================================================================== */
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+button:disabled { cursor: default; }
+
+.icon-btn {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--ink-3);
+  transition: color 200ms var(--ease), background 200ms var(--ease);
+}
+.icon-btn:hover { color: var(--ink-2); background: var(--card); }
+.icon-btn[aria-pressed="true"] { color: var(--accent); }
+
+.icon { width: 21px; height: 21px; stroke: currentColor; fill: none;
+  stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 54px;
+  padding: 0 24px;
+  border-radius: var(--r);
+  background: linear-gradient(to bottom, var(--ctl-a), var(--ctl-b));
+  color: #1a0e03;
+  font-size: 1.02rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  transition: transform 160ms var(--ease), filter 200ms var(--ease);
+}
+.btn:hover { filter: brightness(1.08); }
+.btn:active { transform: scale(0.985); }
+
+.btn--ghost {
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  font-weight: 400;
+}
+.btn--ghost:hover { background: var(--card); filter: none; }
+
+.btn--quiet {
+  background: none;
+  color: var(--ink-3);
+  font-weight: 400;
+  min-height: 44px;
+}
+.btn--quiet:hover { color: var(--ink-2); filter: none; }
+
+/* ==========================================================================
+   Exercise list (home)
+   ========================================================================== */
+
+.ex-list { display: flex; flex-direction: column; gap: 8px; }
+
+.ex {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 13px 15px;
+  text-align: left;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r);
+  background: var(--card);
+  transition: border-color 220ms var(--ease), background 220ms var(--ease);
+}
+.ex:hover { border-color: var(--line); }
+
+.ex[aria-pressed="true"] {
+  border-color: var(--ph-inhale);
+  background: var(--card-active);
+}
+
+.ex__body { flex: 1; min-width: 0; }
+
+.ex__name {
+  font-size: 0.98rem;
+  color: var(--ink-2);
+  letter-spacing: 0.01em;
+}
+.ex[aria-pressed="true"] .ex__name { color: var(--ink); }
+
+.ex__desc {
+  font-size: 0.8rem;
+  color: var(--ink-3);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ex__pattern {
+  flex: none;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  padding: 4px 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+}
+.ex[aria-pressed="true"] .ex__pattern {
+  color: var(--ph-inhale);
+  border-color: rgba(249, 115, 22, 0.4);
+}
+
+/* ==========================================================================
+   Pills (duration / rounds presets)
+   ========================================================================== */
+
+/* ==========================================================================
+   Slider
+   ========================================================================== */
+
+.slider-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.slider-row__value {
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.92rem;
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 34px;
+  background: none;
+  outline: none;
+  margin: 0;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 3px;
+  background: var(--line);
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  margin-top: -9.5px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: none;
+}
+input[type="range"]::-moz-range-track {
+  height: 3px;
+  border-radius: 3px;
+  background: var(--line);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: none;
+}
+
+/* ==========================================================================
+   Rows (settings)
+   ========================================================================== */
+
+.rows { display: flex; flex-direction: column; }
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 2px;
+  border-bottom: 1px solid var(--line-soft);
+  text-align: left;
+  width: 100%;
+}
+.row:last-child { border-bottom: none; }
+
+.row__body { flex: 1; min-width: 0; }
+.row__title { color: var(--ink-2); font-size: 0.95rem; }
+.row__note { color: var(--ink-3); font-size: 0.78rem; margin-top: 2px; }
+.row--disabled { opacity: 0.45; }
+
+/* switch */
+.switch { position: relative; flex: none; width: 46px; height: 28px; }
+.switch input {
+  position: absolute; inset: 0; opacity: 0; margin: 0;
+  width: 100%; height: 100%; cursor: pointer;
+}
+.switch__track {
+  position: absolute; inset: 0;
+  border-radius: 999px;
+  background: #3a2410;
+  border: 1px solid var(--line-soft);
+  transition: background 260ms var(--ease), border-color 260ms var(--ease);
+  pointer-events: none;
+}
+.switch__track::after {
+  content: '';
+  position: absolute;
+  top: 3px; left: 3px;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: #92400e;
+  transition: transform 260ms var(--ease), background 260ms var(--ease);
+}
+.switch input:checked + .switch__track {
+  background: rgba(245, 158, 11, 0.22);
+  border-color: var(--accent);
+}
+.switch input:checked + .switch__track::after {
+  transform: translateX(21px);
+  background: var(--accent);
+}
+.switch input:disabled + .switch__track { opacity: 0.4; }
+
+/* segmented control */
+.seg {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+}
+.seg button {
+  min-height: 32px;
+  padding: 0 13px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  color: var(--ink-3);
+  transition: background 200ms var(--ease), color 200ms var(--ease);
+}
+.seg button[aria-pressed="true"] {
+  background: rgba(245, 158, 11, 0.18);
+  color: var(--accent);
+}
+
+/* ==========================================================================
+   Session
+   ========================================================================== */
+
+.session {
+  position: relative;
+  flex: 1;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-height: 0;
+}
+
+.hud {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 0;
+  transition: opacity 1200ms var(--ease);
+}
+
+.hud__time {
+  font-size: 0.85rem;
+  letter-spacing: 0.1em;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.session__stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(22px, 5vh, 40px);
+  min-height: 0;
+}
+
+.session__foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 0 24px;
+  transition: opacity 1200ms var(--ease);
+}
+
+/* faded by sleep mode */
+.session.is-dimmed .hud,
+.session.is-dimmed .session__foot,
+.session.is-dimmed .dots { opacity: 0; pointer-events: none; }
+
+/* ==========================================================================
+   Ring
+   ========================================================================== */
+
+.ring {
+  position: relative;
+  width: min(72vw, 320px);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+}
+
+.ring__svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+  overflow: visible;
+}
+
+.ring__track {
+  fill: none;
+  stroke: var(--line-soft);
+  stroke-width: 1;
+}
+
+.ring__arc {
+  fill: none;
+  stroke: var(--phase-color);
+  stroke-width: 2;
+  stroke-linecap: round;
+  opacity: 0.9;
+}
+
+/* The part that actually breathes. The scale and fade below are only the
+   at-rest state: during a session ui/ring.js drives transform and opacity with
+   one Web Animations API animation per phase, so the movement runs on the
+   compositor instead of being recomputed here on every frame. */
+.ring__orb {
+  position: absolute;
+  width: 78%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: 1px solid var(--phase-color);
+  background: radial-gradient(
+    circle at 50% 50%,
+    rgba(var(--phase-rgb), 0.16) 0%,
+    rgba(var(--phase-rgb), 0.05) 55%,
+    rgba(var(--phase-rgb), 0) 72%
+  );
+  transform: scale(0.46);
+  will-change: transform;
+}
+
+.ring__glow {
+  position: absolute;
+  width: 130%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 50% 50%,
+    rgba(var(--phase-rgb), 0.13) 0%,
+    rgba(var(--phase-rgb), 0) 62%
+  );
+  opacity: 0.35;
+  transform: scale(0.7);
+  will-change: transform, opacity;
+  pointer-events: none;
+}
+
+.ring__label {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.ring__phase {
+  font-size: clamp(1.1rem, 4.6vw, 1.35rem);
+  letter-spacing: 0.2em;
+  text-transform: lowercase;
+  color: var(--phase-color);
+  transition: color 700ms linear;
+}
+
+.ring__count {
+  font-size: clamp(2.4rem, 11vw, 3.2rem);
+  font-weight: 200;
+  line-height: 1.1;
+  color: var(--countdown);
+  font-variant-numeric: tabular-nums;
+  min-height: 1.1em;
+}
+
+/* ==========================================================================
+   Phase dots
+   ========================================================================== */
+
+.dots {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+  transition: opacity 1200ms var(--ease);
+}
+
+.dot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  opacity: 0.4;
+  transition: opacity 400ms var(--ease);
+}
+.dot.is-active { opacity: 1; }
+
+.dot__mark {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dot-color, var(--ink-3));
+  transform: scale(1);
+  transition: transform 400ms var(--ease), box-shadow 400ms var(--ease);
+}
+.dot.is-active .dot__mark {
+  transform: scale(1.5);
+  box-shadow: 0 0 12px var(--dot-color, var(--ink-3));
+}
+
+.dot__label {
+  font-size: 0.66rem;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.dot.is-active .dot__label { color: var(--dot-color, var(--ink-2)); }
+
+/* ==========================================================================
+   Complete
+   ========================================================================== */
+
+.done {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+  padding-bottom: 24px;
+}
+
+.done__mark {
+  width: 76px; height: 76px;
+  border-radius: 50%;
+  border: 1px solid rgba(252, 211, 77, 0.4);
+  display: grid; place-items: center;
+  color: var(--complete);
+  margin-bottom: 18px;
+  animation: done-in 900ms var(--ease) both;
+}
+@keyframes done-in {
+  from { opacity: 0; transform: scale(0.8); }
+  to { opacity: 1; transform: none; }
+}
+
+.done__title {
+  font-size: 1.5rem;
+  font-weight: 300;
+  letter-spacing: 0.05em;
+  color: var(--complete);
+}
+
+.done__stat { color: var(--ink-3); font-size: 0.9rem; }
+
+.done__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 260px;
+  margin-top: 30px;
+}
+
+/* ==========================================================================
+   History
+   ========================================================================== */
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 26px;
+}
+
+.stat {
+  padding: 14px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r);
+  background: var(--card);
+  text-align: center;
+}
+.stat__value {
+  font-size: 1.5rem;
+  font-weight: 300;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.stat__label {
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-top: 4px;
+}
+
+.heatmap {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, auto);
+  grid-auto-columns: 1fr;
+  /* Without this the rows stretch and the cells come out rectangular; each
+     cell should take its height from its own width. */
+  align-items: start;
+  gap: 3px;
+  margin-bottom: 26px;
+}
+
+.heat {
+  aspect-ratio: 1;
+  border-radius: 2px;
+  background: rgba(249, 115, 22, var(--heat, 0.05));
+}
+
+.log { display: flex; flex-direction: column; }
+
+.log__item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 2px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 0.88rem;
+}
+.log__item:last-child { border-bottom: none; }
+.log__when { color: var(--ink-3); font-size: 0.8rem; }
+
+.empty {
+  text-align: center;
+  color: var(--ink-3);
+  font-size: 0.9rem;
+  padding: 50px 20px;
+}
+
+/* ==========================================================================
+   Toast (offline / update)
+   ========================================================================== */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--sab) + 20px);
+  transform: translate(-50%, 20px);
+  max-width: min(360px, calc(100vw - 40px));
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #150c04;
+  color: var(--ink-2);
+  font-size: 0.85rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 320ms var(--ease), transform 320ms var(--ease);
+  z-index: 50;
+}
+.toast.is-visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  pointer-events: auto;
+}
+.toast button {
+  color: var(--accent);
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   Focus
+   ========================================================================== */
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+/* ==========================================================================
+   Short viewports — keep the session on one screen
+   ========================================================================== */
+
+@media (max-height: 700px) {
+  .ring { width: min(58vw, 240px); }
+  .dots { gap: 14px; }
+}
+
+/* ==========================================================================
+   Wide screens — a desktop browser, not a phone
+
+   The phone layout is deliberately untouched. The min-height guard keeps
+   this off an iPhone held in landscape, which is wide enough to match the
+   width query but far too short for the roomier spacing.
+   ========================================================================== */
+
+/* Width and type. Safe at any height because nothing here grows the layout
+   much vertically, and the ring is sized from vh so it self-limits. */
+@media (min-width: 760px) and (min-height: 600px) {
+  :root { --col: 600px; }
+
+  .view { padding: 0 28px; }
+  .title { font-size: 1.6rem; }
+  .section-label { font-size: 0.76rem; }
+
+  .ex { gap: 18px; }
+  .ex__name { font-size: 1.06rem; }
+  .ex__desc { font-size: 0.85rem; }
+  .ex__pattern { font-size: 0.84rem; padding: 5px 11px; }
+
+  .pill { font-size: 1rem; }
+  .btn { font-size: 1.08rem; }
+
+  /* The session screen gains the most from a big display. */
+  .ring { width: min(52vh, 440px); }
+  .ring__phase { font-size: 1.5rem; }
+  .ring__count { font-size: 3.6rem; }
+  .dots { gap: 30px; }
+  .dot__label { font-size: 0.7rem; }
+
+  .row__title { font-size: 1.02rem; }
+  .row__note { font-size: 0.82rem; }
+  .stat__value { font-size: 1.7rem; }
+  .heatmap { max-width: 100%; }
+}
+
+/* A real desktop window. A single column just gets stretched — the card's
+   name sits far left and its pattern far right with dead space between — so
+   the list goes two-up at roughly phone-card proportions and the two control
+   blocks sit side by side. That uses the width instead of spreading into it,
+   and it shortens the screen enough to fit a short window too. */
+@media (min-width: 1000px) and (min-height: 600px) {
+  :root { --col: 880px; }
+
+  .ex-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .home__foot { align-items: center; }
+  .home__foot .btn,
+  .home__foot .quick { width: min(100%, 420px); }
+
+}
+
+/* Vertical breathing room, only where there is height to spend. A 1280x720
+   window is wide but short, and this spacing would push Home past the
+   bottom and re-introduce a scrollbar. */
+@media (min-width: 760px) and (min-height: 820px) {
+  .topbar { padding: 26px 0 22px; }
+  .ex { padding: 17px 20px; }
+  .ex-list { gap: 10px; }
+  .block { margin-bottom: 26px; }
+  .pill { min-height: 52px; }
+  .btn { min-height: 60px; }
+  .home__foot { padding: 18px 0 26px; }
+  .row { padding: 15px 4px; }
+}
+
+/* ==========================================================================
+   Reduced motion — the orb stops scaling and breathes with opacity instead
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .app__dim { transition: none; }
+}
+
+/* The rules above cannot reach the breath: a Web Animations API animation
+   outranks any author rule without `!important`, and the blanket
+   `animation-duration` override only applies to CSS animations. ui/ring.js
+   checks for this class itself and animates opacity at a fixed scale — these
+   two rules are its at-rest state. */
+.reduce-motion .ring__orb {
+  transform: scale(0.86);
+  opacity: 0.35;
+}
+.reduce-motion .ring__glow { transform: scale(0.9); }
