@@ -33,10 +33,10 @@ export const PHASE_RGB = {
  * always has to be there.
  */
 export const CUSTOM_KINDS = [
-  { key: 'in', name: 'Inhale', kind: 'in', min: 1, max: 20 },
-  { key: 'hold', name: 'Hold', kind: 'hold', min: 0, max: 20 },
-  { key: 'out', name: 'Exhale', kind: 'out', min: 1, max: 20 },
-  { key: 'wait', name: 'Wait', kind: 'wait', min: 0, max: 20 }
+  { key: 'in', name: 'Inhale', kind: 'in', min: 1, max: 30 },
+  { key: 'hold', name: 'Hold', kind: 'hold', min: 0, max: 30 },
+  { key: 'out', name: 'Exhale', kind: 'out', min: 1, max: 30 },
+  { key: 'wait', name: 'Wait', kind: 'wait', min: 0, max: 30 }
 ];
 
 /** What the Box ladder may be set to. `to` moves on a half-second grid. */

@@ -17,7 +17,7 @@ test('sanitizeSettings fills, types, clamps, and rebuilds the object-valued sett
     brightness: 5
   });
   assert.equal(s.sound, 'voice');
-  assert.deepEqual(s.custom, { in: 20, hold: 0, out: 6, wait: 3 });
+  assert.deepEqual(s.custom, { in: 30, hold: 0, out: 6, wait: 3 });
   assert.deepEqual(s.ladder, { on: false, to: 7.5, step: 1, minutes: 60 });
   assert.deepEqual(s.lengths, {});
   assert.equal(s.brightness, 1);
