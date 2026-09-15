@@ -1,5 +1,5 @@
 import { el, icon, mmss } from '../dom.js';
-import { getExercise, getPhases, endKind, PHASE_COLORS, PHASE_RGB, num } from '../exercises.js';
+import { getExercise, getPhases, endKind, PHASE_COLORS, num } from '../exercises.js';
 import { createRing } from './ring.js';
 import * as audio from '../audio.js';
 import * as haptics from '../haptics.js';
@@ -9,23 +9,13 @@ import { endTimeFor } from '../engine.js';
 
 const SLEEP_DELAY = 20000;
 
-function smoothstep(t) {
-  return t * t * (3 - 2 * t);
-}
-
 /**
- * Colour drifts continuously from this phase's colour toward the next one, so
- * the light swells and fades with the breath rather than switching between
- * four flat states.
+ * How often the engine wakes between the moments that change something on
+ * screen. Only the ambient pad needs it: `audio.follow` smooths between writes
+ * but wants a fresh one every hundred milliseconds or so. With any other sound
+ * setting the engine sleeps until the next second, digit or phase boundary.
  */
-function blend(from, to, t) {
-  const k = smoothstep(t);
-  return [
-    Math.round(from[0] + (to[0] - from[0]) * k),
-    Math.round(from[1] + (to[1] - from[1]) * k),
-    Math.round(from[2] + (to[2] - from[2]) * k)
-  ];
-}
+const AMBIENT_TICK = 0.1;
 
 export function session(app, props) {
   const { settings } = app;
@@ -39,7 +29,8 @@ export function session(app, props) {
     mode: exercise.mode,
     limitSeconds: props.limitMinutes ? props.limitMinutes * 60 : 0,
     targetRounds: props.targetRounds || 0,
-    endKind: endKind(props.exerciseId)
+    endKind: endKind(props.exerciseId),
+    tick: settings.sound === 'ambient' ? AMBIENT_TICK : 0
   };
 
   // What the HUD counts towards: the real end, not the limit. The session
@@ -124,22 +115,14 @@ export function session(app, props) {
   off.push(engine.on('phase', onPhase));
   off.push(engine.on('end', onEnd));
 
-  let lastRgb = '';
   let lastHud = '';
 
-  // The breath itself is not here: it is one compositor animation per phase,
-  // handed to the ring at the boundary. This runs on the engine's coarse tick
-  // and only touches things that change at human speed.
+  // The breath itself is not here: it is a set of compositor animations per
+  // phase, handed to the ring at the boundary — scale, glow, arc and colour
+  // alike. This runs on the engine's coarse tick and only touches things that
+  // change at human speed.
   function onFrame(f) {
     if (settings.countdown) ring.setCountdown(num(f.countdown));
-
-    const next = phases[(f.index + 1) % phases.length];
-    const rgb = blend(PHASE_RGB[f.phase.kind], PHASE_RGB[next.kind], f.progress);
-    const key = rgb.join(',');
-    if (key !== lastRgb) {
-      lastRgb = key;
-      ring.setColor(`rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`, key);
-    }
 
     const label = isRounds
       ? `Round ${Math.min(f.rounds + 1, targetRounds || f.rounds + 1)}${targetRounds ? ` of ${targetRounds}` : ''}`
@@ -167,8 +150,10 @@ export function session(app, props) {
     ring.setPhaseName(phase.name);
     // Seeked, not restarted — this is equally a phase starting, a resumed
     // session picking back up, and a backgrounded one snapping to where the
-    // clock says it should be.
-    ring.setPhase(phase.kind, phase.duration * 1000, phaseElapsed * 1000, engine.paused);
+    // clock says it should be. The next phase's kind is what the colour
+    // drifts towards over this one.
+    const next = phases[(index + 1) % phases.length];
+    ring.setPhase(phase.kind, next.kind, phase.duration * 1000, phaseElapsed * 1000, engine.paused);
     dots.forEach((dot, i) => dot.classList.toggle('is-active', i === index));
 
     // `initial` opens the session, `resynced` is it coming back from a pause or
@@ -195,21 +180,48 @@ export function session(app, props) {
     });
   }
 
+  function pauseSession() {
+    engine.pause();
+    ring.setPaused(true);
+    audio.stop();
+    primaryBtn.replaceChildren(icon('play'), el('span', {}, 'Resume'));
+    wakelock.release();
+  }
+
+  function resumeSession() {
+    audio.unlock();
+    engine.resume(); // re-seeks the ring itself, via a resynced phase event
+    primaryBtn.replaceChildren(icon('pause'), el('span', {}, 'Pause'));
+    wakelock.request(onWakeLockDenied);
+  }
+
   function togglePause() {
     wake();
-    if (engine.paused) {
-      audio.unlock();
-      engine.resume(); // re-seeks the ring itself, via a resynced phase event
-      primaryBtn.replaceChildren(icon('pause'), el('span', {}, 'Pause'));
-      wakelock.request(onWakeLockDenied);
-    } else {
-      engine.pause();
-      ring.setPaused(true);
-      audio.stop();
-      primaryBtn.replaceChildren(icon('play'), el('span', {}, 'Resume'));
-      wakelock.release();
+    if (engine.paused) resumeSession();
+    else pauseSession();
+  }
+
+  /**
+   * Leaving the app pauses the session. It used to keep running: switch to a
+   * message, lock the phone, come back to find the breath had carried on
+   * without you and the minutes recorded as if you had breathed them. Coming
+   * back does not resume — that is one tap, and it should be yours.
+   */
+  let pausedAway = false;
+
+  function onVisibility() {
+    if (document.visibilityState === 'hidden') {
+      if (!engine.active || engine.paused) return;
+      pauseSession();
+      pausedAway = true;
+    } else if (pausedAway) {
+      pausedAway = false;
+      wake();
+      app.toast('Paused while you were away');
     }
   }
+
+  document.addEventListener('visibilitychange', onVisibility);
 
   /** User-initiated stop. The engine records it as an incomplete session. */
   function stop() {
@@ -245,6 +257,7 @@ export function session(app, props) {
       engine.dispose();
       clearTimeout(sleepTimer);
       window.removeEventListener('keydown', onKey);
+      document.removeEventListener('visibilitychange', onVisibility);
       audio.stop();
       haptics.stop();
       wakelock.release();

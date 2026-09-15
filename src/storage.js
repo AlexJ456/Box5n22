@@ -190,16 +190,18 @@ export function historyStats(list) {
   const totalSeconds = list.reduce((sum, e) => sum + e.seconds, 0);
 
   // Count back from today. A day with no session yet does not break the
-  // streak until it is over, so we allow starting from yesterday.
-  const DAY = 86400000;
+  // streak until it is over, so we allow starting from yesterday. Stepped by
+  // calendar day, not by 24 hours: after the clocks go back, 24 hours before
+  // midnight is 11pm the day before, and every step from there is a day out.
   let streak = 0;
-  let cursor = Date.now();
-  if (!days.has(dayKey(cursor))) cursor -= DAY;
-  while (days.has(dayKey(cursor))) {
+  const cursor = new Date();
+  if (!days.has(dayKey(cursor.getTime()))) cursor.setDate(cursor.getDate() - 1);
+  while (days.has(dayKey(cursor.getTime()))) {
     streak += 1;
-    cursor -= DAY;
+    cursor.setDate(cursor.getDate() - 1);
   }
 
+  const DAY = 86400000;
   const weekAgo = Date.now() - 7 * DAY;
   const thisWeek = list.filter((e) => e.ts >= weekAgo).length;
 
@@ -217,7 +219,6 @@ export function historyStats(list) {
  * and aligned so each column is a Sunday-to-Saturday week.
  */
 export function heatmapData(list, weeks = 12) {
-  const DAY = 86400000;
   const perDay = new Map();
   for (const entry of list) {
     const key = dayKey(entry.ts);
@@ -226,11 +227,16 @@ export function heatmapData(list, weeks = 12) {
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const end = today.getTime() + (6 - today.getDay()) * DAY; // end of this week
-  const start = end - (weeks * 7 - 1) * DAY;
+  const end = new Date(today);
+  end.setDate(end.getDate() + (6 - today.getDay())); // end of this week
+  const start = new Date(end);
+  start.setDate(start.getDate() - (weeks * 7 - 1));
 
+  // Walked with setDate, which keeps midnight across a clock change; adding
+  // 86 400 000 ms does not, and used to shift every cell after one by a day.
   const cells = [];
-  for (let t = start; t <= end; t += DAY) {
+  for (const d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const t = d.getTime();
     cells.push({ ts: t, seconds: perDay.get(dayKey(t)) || 0, future: t > today.getTime() });
   }
   return cells;
@@ -243,7 +249,17 @@ export function heatmapData(list, weeks = 12) {
    moving a file. Export writes one, import merges it in.
    ------------------------------------------------------------------------- */
 
-export function exportBackup(list, settings) {
+/**
+ * Write a backup file. Resolves to 'shared', 'downloaded' or 'cancelled'.
+ *
+ * On a phone the file goes through the share sheet: an installed iOS app has
+ * nowhere sensible to put a download, and the share sheet offers Files,
+ * AirDrop and the rest. A desktop browser has a downloads folder, so there the
+ * link is kept — a desktop share dialog would have nowhere to save to. Must be
+ * called from a user gesture, and `share()` is reached without an await in
+ * between so that activation still holds.
+ */
+export async function exportBackup(list, settings) {
   const backup = {
     format: BACKUP_FORMAT,
     version: BACKUP_VERSION,
@@ -251,12 +267,41 @@ export function exportBackup(list, settings) {
     settings: sanitizeSettings(settings),
     history: list
   };
+  const json = JSON.stringify(backup, null, 2);
+  const name = `breathe-backup-${dayKey(Date.now())}.json`;
 
-  const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+  if (shouldShare()) {
+    const file = new File([json], name, { type: 'application/json' });
+    if (navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: 'Breathe backup' });
+        return 'shared';
+      } catch (e) {
+        if (e && e.name === 'AbortError') return 'cancelled';
+        // Anything else: fall through to the download.
+      }
+    }
+  }
+
+  download(json, name);
+  return 'downloaded';
+}
+
+function shouldShare() {
+  return (
+    typeof File === 'function' &&
+    typeof navigator.share === 'function' &&
+    typeof navigator.canShare === 'function' &&
+    window.matchMedia('(pointer: coarse)').matches
+  );
+}
+
+function download(text, name) {
+  const blob = new Blob([text], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `breathe-backup-${dayKey(Date.now())}.json`;
+  a.download = name;
   document.body.appendChild(a);
   a.click();
   a.remove();

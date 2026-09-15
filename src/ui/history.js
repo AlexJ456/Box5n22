@@ -23,15 +23,22 @@ function intensity(seconds) {
   return 0.9;
 }
 
+/** Whole calendar days since the epoch, in local time — immune to DST. */
+function dayIndex(ts) {
+  const d = new Date(ts);
+  return Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
+}
+
+/**
+ * "Today", "Yesterday", "3 days ago", or a date. Counted in calendar days, not
+ * 24-hour blocks measured from midnight: that used to file a session from
+ * yesterday evening under "Today" and one from two days back under "Yesterday".
+ */
 function relative(ts) {
-  const day = 86400000;
-  const midnight = new Date();
-  midnight.setHours(0, 0, 0, 0);
-  const diff = Math.floor((midnight.getTime() - ts) / day);
-  if (diff < 0) return 'Today';
-  if (diff === 0) return 'Today';
-  if (diff === 1) return 'Yesterday';
-  if (diff < 7) return `${diff + 1} days ago`;
+  const days = dayIndex(Date.now()) - dayIndex(ts);
+  if (days <= 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  if (days < 7) return `${days} days ago`;
   return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 

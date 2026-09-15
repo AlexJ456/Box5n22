@@ -14,20 +14,19 @@
  *
  * There is no requestAnimationFrame loop. The ring animates itself on the
  * compositor (see ui/ring.js), leaving this to wake only at moments that change
- * something: a phase boundary, a countdown digit, a whole second, a colour step,
- * the end. Every wake is scheduled from absolute time, so a timer that fires
- * late gets a shorter next delay instead of pushing the error forward. In iPhone
- * Low Power Mode, where rAF is throttled to 30fps, this is both smoother and
- * more accurate than a frame loop.
+ * something: a phase boundary, a countdown digit, a whole second, the end, and
+ * an optional fine tick for the ambient sound. Every wake is scheduled from
+ * absolute time, so a timer that fires late gets a shorter next delay instead
+ * of pushing the error forward. In iPhone Low Power Mode, where rAF is
+ * throttled to 30fps, this is both smoother and more accurate than a frame
+ * loop — and a phase can never run long or short, because nothing is counted:
+ * every boundary is `n × duration` on the same clock.
  *
  * Pause banks the paused duration and subtracts it, so resuming picks the breath
  * back up exactly where it was left.
  *
  * Events: `frame`, `phase`, `pause`, `resume`, `end`.
  */
-
-/** How often the phase colour is re-blended, in seconds. */
-const COLOUR_STEP = 0.1;
 
 /** Divergence between the monotonic and wall clocks that means a real suspend. */
 const SUSPEND_MS = 1000;
@@ -109,6 +108,11 @@ export function createEngine() {
    * advancing it while the device is genuinely suspended, which would hand the
    * session back time it never spent. `reconcile()` measures that and folds it
    * in here.
+   *
+   * A stall while *paused* is a different matter: `pausedTotal` is measured on
+   * the same stalled clock, so it already comes out of the sum, and it must not
+   * be counted a second time as skew. That is why `wallOffset` is re-based on
+   * resume rather than fixed at the start.
    */
   function elapsedSeconds() {
     if (!s) return 0;
@@ -125,14 +129,19 @@ export function createEngine() {
   /**
    * Fold in any time the monotonic clock slept through.
    *
-   * Only called when the page returns to the foreground, the one moment a
-   * suspend can have happened. Wall time is trusted for the size of the gap and
-   * never as the clock itself, and only ever forwards: a clock correction that
-   * moves time backwards must not rewind the breath.
+   * Only called when the page returns to the foreground while running, the one
+   * moment a suspend can have happened. Wall time is trusted for the size of
+   * the gap and never as the clock itself, and only ever forwards: a clock
+   * correction that moves time backwards must not rewind the breath. The gap is
+   * measured since the last look, not since the start, so nothing is ever
+   * folded in twice and a stall that happened while paused is never folded in
+   * at all.
    */
   function reconcile() {
     if (!s) return;
-    const missing = (Date.now() - s.t0Wall) - (now() - s.t0) - s.skew;
+    const offset = Date.now() - now();
+    const missing = offset - s.wallOffset;
+    s.wallOffset = offset;
     if (missing > SUSPEND_MS) s.skew += missing;
   }
 
@@ -225,13 +234,14 @@ export function createEngine() {
     // whole number waits a full second rather than firing twice.
     const toDigit = remaining - Math.max(0, Math.ceil(remaining - EPS) - 1);
 
-    const next = Math.min(
+    let next = Math.min(
       s.endTime,
-      elapsed + remaining,                                          // phase boundary
-      elapsed + toDigit,                                            // countdown digit
-      Math.floor(elapsed + EPS) + 1,                                // HUD second
-      (Math.floor(elapsed / COLOUR_STEP + EPS) + 1) * COLOUR_STEP   // colour step
+      elapsed + remaining,            // phase boundary
+      elapsed + toDigit,              // countdown digit
+      Math.floor(elapsed + EPS) + 1   // HUD second
     );
+    // The fine tick, when a listener has asked for one (the ambient sound).
+    if (s.tick > 0) next = Math.min(next, (Math.floor(elapsed / s.tick + EPS) + 1) * s.tick);
 
     timer = setTimeout(tick, Math.max(0, (next - elapsed) * 1000));
   }
@@ -320,6 +330,8 @@ export function createEngine() {
    * @param {number} config.limitSeconds  0 = open-ended
    * @param {number} config.targetRounds  0 = open-ended
    * @param {string} config.endKind       phase kind to finish on, default 'out'
+   * @param {number} [config.tick]        extra wake interval in seconds, 0/absent
+   *                                      = none. Only the ambient pad needs one.
    */
   function start(config) {
     stopLoop();
@@ -332,12 +344,13 @@ export function createEngine() {
       endTime: endTimeFor(phases, config),
       mode: config.mode,
       t0: now(),
-      t0Wall: Date.now(),
+      wallOffset: Date.now() - now(),
       skew: 0,
       pausedAt: 0,
       pausedTotal: 0,
       running: true,
-      ordinal: 0
+      ordinal: 0,
+      tick: config.tick > 0 ? config.tick : 0
     };
 
     emit('phase', {
@@ -382,6 +395,9 @@ export function createEngine() {
   function resume() {
     if (!s || s.running) return;
     s.pausedTotal += now() - s.pausedAt;
+    // Whatever the two clocks did to each other while paused is already
+    // accounted for by `pausedTotal`; start measuring afresh from here.
+    s.wallOffset = Date.now() - now();
     s.running = true;
     emit('resume');
     resync();
