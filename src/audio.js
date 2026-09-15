@@ -6,6 +6,13 @@
  *            carried over unchanged from the previous build
  *   ambient  a soft pad that rises through the inhale, holds at the top, falls
  *            back through the exhale and drops away to nothing in the wait
+ *   voice    nothing here — see voice.js; only the completion bell is shared
+ *
+ * The pad is driven the way the ring is: at each phase boundary the whole
+ * phase's envelope is handed to the audio thread as a value curve on the
+ * AudioContext clock (`phase()`), so between boundaries nothing runs on the
+ * main thread at all. The previous version wrote parameters from a timer ten
+ * times a second, which is exactly what Low Power Mode throttles.
  *
  * The AudioContext is created lazily on the first user gesture. Creating it at
  * load (as the previous build did) means Safari hands back a suspended context
@@ -21,9 +28,6 @@ let mode = 'off';
 let pad = null;
 let retiring = [];
 let impulse = null;
-let lastParamUpdate = 0;
-let lastAmount = 0;
-let swellUntil = 0;
 
 /* -------------------------------------------------------------------------
    Ambient tuning
@@ -77,9 +81,13 @@ const AMBIENT = {
   shimmerHz: 3.5,
   shimmerDepth: 0.012,
 
-  // A soft "wush" at each phase boundary — textural, never percussive.
+  // A soft "wush" at each phase boundary — textural, never percussive: the
+  // filter lifts by this much over `swellRise` seconds and settles back over
+  // `swellSettle` (a time constant).
   swellLift: 700,
-  swellMs: 450,
+  swellRise: 0.09,
+  swellSettle: 0.22,
+  swellSeconds: 0.45,
 
   // Procedural room. Length in seconds, and how much of the pad is sent to it.
   reverbSeconds: 2.8,
@@ -221,21 +229,34 @@ function noiseBuffer(c) {
 }
 
 /**
- * Where the pad should sit right now, as a single 0–1 number.
+ * Where the pad sits `p` of the way through a phase of this kind, as a single
+ * 0–1 number:
  *
  *   in     climbs to the maximum by the end of the inhale
  *   hold   parked at that maximum, unchanged
  *   out    falls back down through the exhale
  *   wait   the bottom — level drops to `levelFloor`, near silence
  *
- * The engine already holds `breath` at a constant 1 through the whole hold and
- * 0 through the whole wait, so the phase kind is what tells those two apart
- * from a moving inhale or exhale that happens to be at an extreme.
+ * The inhale and exhale follow the same ease-in-out-sine the engine uses for
+ * the breath itself (`0.5 - cos(πp)/2`), shaped by `curve`. Pure, and exported
+ * so the tests can hold it against the engine's easing.
  */
-function envelope(breath, kind) {
+export function envelopeAt(kind, p) {
   if (kind === 'hold') return 1;
   if (kind === 'wait') return 0;
-  return Math.pow(Math.max(0, Math.min(1, breath)), AMBIENT.curve);
+  const fill = 0.5 - Math.cos(Math.PI * Math.max(0, Math.min(1, p))) / 2;
+  const breath = kind === 'out' ? 1 - fill : fill;
+  return Math.pow(breath, AMBIENT.curve);
+}
+
+/** `count` samples of the envelope from `p0` to 1, for setValueCurveAtTime. */
+export function sampleEnvelope(kind, p0, count) {
+  const out = new Float32Array(count);
+  for (let i = 0; i < count; i += 1) {
+    const t = count === 1 ? 1 : i / (count - 1);
+    out[i] = envelopeAt(kind, p0 + (1 - p0) * t);
+  }
+  return out;
 }
 
 function startPad() {
@@ -246,8 +267,6 @@ function startPad() {
   // Pausing and resuming inside the fade-out window would otherwise build a
   // second pad on top of the first one and double the volume.
   clearRetiring();
-  lastAmount = 0;
-  swellUntil = 0;
 
   const stereo = typeof c.createStereoPanner === 'function';
   const t = c.currentTime;
@@ -282,7 +301,7 @@ function startPad() {
 
   // The shimmer rides into the level AudioParam. Web Audio sums a param's
   // scheduled value with whatever is connected to it, so this layers on top of
-  // the setTargetAtTime writes in follow() instead of fighting them.
+  // the curves phase() schedules instead of fighting them.
   const lfo = c.createOscillator();
   lfo.type = 'sine';
   lfo.frequency.setValueAtTime(AMBIENT.shimmerHz, t);
@@ -340,7 +359,6 @@ function stopPad() {
   const t = ctx.currentTime;
   const dead = t + AMBIENT.fadeOut + 0.3;
   pad = null;
-  swellUntil = 0;
 
   // The oscillators keep running while the tail fades, so hold on to the graph
   // until they are actually gone.
@@ -371,57 +389,6 @@ function silence(graph, at, timeConstant, dead) {
   } catch (e) {
     /* already stopped */
   }
-}
-
-/**
- * Follow the breath. Called every frame during a session; parameter writes are
- * throttled to ~25Hz because `setTargetAtTime` smooths between them anyway.
- */
-export function follow(breath, kind) {
-  if (mode !== 'ambient') return;
-  if (!pad) startPad();
-  if (!pad || !ctx) return;
-
-  const now = ctx.currentTime;
-  if (now - lastParamUpdate < 0.04) return;
-  lastParamUpdate = now;
-
-  const amount = envelope(breath, kind);
-
-  // Settle more slowly than we open, so the exhale feels like a release.
-  const glide = amount >= lastAmount ? AMBIENT.glideIn : AMBIENT.glideOut;
-  lastAmount = amount;
-
-  const level =
-    kind === 'wait'
-      ? AMBIENT.levelFloor
-      : AMBIENT.levelLow + (AMBIENT.levelHigh - AMBIENT.levelLow) * amount;
-  pad.level.gain.setTargetAtTime(level, now, glide);
-
-  // Leave the filter alone while a boundary swell is still ringing out,
-  // otherwise these writes cancel it 40ms after it starts.
-  if (now >= swellUntil) {
-    pad.filter.frequency.setTargetAtTime(
-      AMBIENT.cutoffLow + (AMBIENT.cutoffHigh - AMBIENT.cutoffLow) * amount,
-      now,
-      glide
-    );
-  }
-
-  // Only the hold shimmers — everywhere else the movement is the envelope.
-  pad.lfoDepth.gain.setTargetAtTime(kind === 'hold' ? AMBIENT.shimmerDepth : 0, now, 0.15);
-
-  // The top voice only arrives near the peak of the breath.
-  const bloom = Math.max(0, amount - AMBIENT.bloomFrom) / (1 - AMBIENT.bloomFrom);
-  for (const voice of pad.voices) {
-    if (!voice.spec.bloom) continue;
-    voice.gain.gain.setTargetAtTime(Math.max(0.0001, voice.spec.gain * bloom), now, glide);
-  }
-
-  const airAmount =
-    kind === 'wait' ? 0 : Math.max(0, amount - AMBIENT.airFrom) / (1 - AMBIENT.airFrom);
-  pad.airGain.gain.setTargetAtTime(Math.max(0.0001, AMBIENT.airLevel * airAmount), now, glide);
-  pad.airFilter.frequency.setTargetAtTime(AMBIENT.airHz * (1 + 0.6 * amount), now, glide);
 }
 
 /**
@@ -462,17 +429,106 @@ function ambientBell(kind) {
   osc.stop(t + 0.55);
 }
 
-/** A soft "wush" marking a phase boundary — textural, never percussive. */
-function swell() {
-  if (!pad || !ctx) return;
-  const now = ctx.currentTime;
-  const from = pad.filter.frequency.value;
+/** Samples per second in a scheduled curve. Plenty for a pad that glides. */
+const CURVE_RATE = 50;
 
-  pad.filter.frequency.cancelScheduledValues(now);
-  pad.filter.frequency.setValueAtTime(from, now);
-  pad.filter.frequency.linearRampToValueAtTime(from + AMBIENT.swellLift, now + 0.09);
-  pad.filter.frequency.setTargetAtTime(AMBIENT.cutoffLow, now + 0.09, 0.22);
-  swellUntil = now + AMBIENT.swellMs / 1000;
+/** Hz above the base cutoff, `t` seconds after a boundary: the "wush". */
+function swellBump(t) {
+  if (t >= AMBIENT.swellSeconds) return 0;
+  const { swellLift, swellRise, swellSettle } = AMBIENT;
+  return swellLift * (t < swellRise ? t / swellRise : Math.exp(-(t - swellRise) / swellSettle));
+}
+
+/**
+ * Hand a parameter a whole curve. Anchored at its current value first so a
+ * seek or a resume glides into the curve over a few tens of milliseconds
+ * instead of jumping — at an ordinary boundary the two already meet.
+ */
+function scheduleCurve(param, values, at, seconds) {
+  const current = param.value;
+  param.cancelScheduledValues(at);
+  param.setValueAtTime(current, at);
+  const lead = Math.min(0.05, seconds / 2);
+  param.linearRampToValueAtTime(values[0], at + lead);
+  if (values.length > 1 && seconds - lead > 0.01) {
+    param.setValueCurveAtTime(values, at + lead, seconds - lead);
+  }
+}
+
+/** Ease a parameter to one value and leave it there (holds and waits). */
+function settle(param, value, at, timeConstant) {
+  const current = param.value;
+  param.cancelScheduledValues(at);
+  param.setValueAtTime(current, at);
+  param.setTargetAtTime(value, at, timeConstant);
+}
+
+/**
+ * Schedule the rest of a phase on the audio clock.
+ *
+ * Called on every phase event, with how far into the phase the session clock
+ * already is — so, like the ring, this is equally how a phase starts, how a
+ * resumed session picks the pad back up, and how one back from the background
+ * lands where it should. `cue` is true only for a boundary the session
+ * actually crossed; it adds the swell.
+ */
+export function phase(kind, durationSec, elapsedSec, cue) {
+  if (mode !== 'ambient') return;
+  if (!pad) startPad();
+  if (!pad || !ctx) return;
+
+  const at = ctx.currentTime;
+  const remaining = Math.max(0, durationSec - elapsedSec);
+  const p0 = durationSec > 0 ? Math.min(1, Math.max(0, elapsedSec / durationSec)) : 1;
+  const moving = (kind === 'in' || kind === 'out') && remaining > 0.05;
+
+  const A = AMBIENT;
+  const level = (a) => (kind === 'wait' ? A.levelFloor : A.levelLow + (A.levelHigh - A.levelLow) * a);
+  const cutoff = (a) => A.cutoffLow + (A.cutoffHigh - A.cutoffLow) * a;
+  const bloom = (spec, a) => Math.max(0.0001, spec.gain * Math.max(0, a - A.bloomFrom) / (1 - A.bloomFrom));
+  const air = (a) => (kind === 'wait' ? 0.0001 : Math.max(0.0001, A.airLevel * Math.max(0, a - A.airFrom) / (1 - A.airFrom)));
+  const airCutoff = (a) => A.airHz * (1 + 0.6 * a);
+
+  if (moving) {
+    const count = Math.max(2, Math.ceil(remaining * CURVE_RATE));
+    const amount = sampleEnvelope(kind, p0, count);
+    const map = (fn) => {
+      const out = new Float32Array(count);
+      for (let i = 0; i < count; i += 1) out[i] = fn(amount[i], (i / (count - 1)) * remaining);
+      return out;
+    };
+    scheduleCurve(pad.level.gain, map(level), at, remaining);
+    scheduleCurve(pad.filter.frequency, map((a, t) => cutoff(a) + (cue ? swellBump(t) : 0)), at, remaining);
+    for (const voice of pad.voices) {
+      if (voice.spec.bloom) scheduleCurve(voice.gain.gain, map((a) => bloom(voice.spec, a)), at, remaining);
+    }
+    scheduleCurve(pad.airGain.gain, map(air), at, remaining);
+    scheduleCurve(pad.airFilter.frequency, map(airCutoff), at, remaining);
+  } else {
+    // Settle more slowly on the way down, so the wait feels like a release.
+    const a = envelopeAt(kind, 1);
+    const glide = kind === 'wait' ? A.glideOut : A.glideIn;
+    settle(pad.level.gain, level(a), at, glide);
+    if (cue) {
+      // The wush on a hold or wait: lift, then settle onto the phase's cutoff.
+      const f = pad.filter.frequency;
+      const current = f.value;
+      f.cancelScheduledValues(at);
+      f.setValueAtTime(current, at);
+      f.linearRampToValueAtTime(current + A.swellLift, at + A.swellRise);
+      f.setTargetAtTime(cutoff(a), at + A.swellRise, A.swellSettle);
+    } else {
+      settle(pad.filter.frequency, cutoff(a), at, glide);
+    }
+    for (const voice of pad.voices) {
+      if (voice.spec.bloom) settle(voice.gain.gain, bloom(voice.spec, a), at, glide);
+    }
+    settle(pad.airGain.gain, air(a), at, glide);
+    settle(pad.airFilter.frequency, airCutoff(a), at, glide);
+  }
+
+  // Only the hold shimmers — everywhere else the movement is the envelope.
+  settle(pad.lfoDepth.gain, kind === 'hold' ? A.shimmerDepth : 0, at, 0.15);
 }
 
 /* -------------------------------------------------------------------------
@@ -481,10 +537,7 @@ function swell() {
 
 export function phaseCue(kind) {
   if (mode === 'chime') phaseChime();
-  else if (mode === 'ambient') {
-    swell();
-    ambientBell(kind);
-  }
+  else if (mode === 'ambient') ambientBell(kind);
 }
 
 export function completeCue() {

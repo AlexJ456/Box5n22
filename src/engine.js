@@ -5,22 +5,29 @@
  * per-frame deltas, so the breath cannot drift however badly the frame rate
  * behaves. Two consequences are the whole point of this file:
  *
- * Nothing is learned by observation. Rounds are `floor(elapsed / cycle)` and the
- * session ends at an instant `endTimeFor` works out before the first breath. The
- * previous version watched the phase index for a change and counted a round when
- * it wrapped, which silently lost rounds — and overran the session — whenever
- * the loop stalled across a boundary. Backgrounding the app stalls it for
- * minutes, so this was not a rare case.
+ * Nothing is learned by observation. The current cycle is found by walking the
+ * session's rungs from zero, and the session ends at an instant `endTimeFor`
+ * works out before the first breath. The previous version watched the phase
+ * index for a change and counted a round when it wrapped, which silently lost
+ * rounds — and overran the session — whenever the loop stalled across a
+ * boundary. Backgrounding the app stalls it for minutes, so this was not a
+ * rare case.
  *
- * There is no requestAnimationFrame loop. The ring animates itself on the
- * compositor (see ui/ring.js), leaving this to wake only at moments that change
- * something: a phase boundary, a countdown digit, a whole second, the end, and
- * an optional fine tick for the ambient sound. Every wake is scheduled from
- * absolute time, so a timer that fires late gets a shorter next delay instead
- * of pushing the error forward. In iPhone Low Power Mode, where rAF is
- * throttled to 30fps, this is both smoother and more accurate than a frame
- * loop — and a phase can never run long or short, because nothing is counted:
- * every boundary is `n × duration` on the same clock.
+ * There is no requestAnimationFrame loop, and no periodic tick at all. The ring
+ * animates itself on the compositor (see ui/ring.js) and the ambient sound is
+ * scheduled on the audio clock (see audio.js), leaving this to wake only at
+ * moments that change something: a phase boundary, a countdown digit, a whole
+ * second, the end. Every wake is scheduled from absolute time, so a timer that
+ * fires late gets a shorter next delay instead of pushing the error forward. In
+ * iPhone Low Power Mode, where rAF is throttled to 30fps, this is both smoother
+ * and more accurate than a frame loop — and a phase can never run long or
+ * short, because nothing is counted: every boundary is a sum of durations on
+ * the same clock.
+ *
+ * A session is a list of rungs, `[{ fromSeconds, phases }]`: each cycle uses
+ * the last rung whose mark is at or before the cycle's start. An ordinary
+ * session has one rung; a Box ladder has one per rise, so the phase time only
+ * ever changes at the top of a cycle and no breath is cut short.
  *
  * Pause banks the paused duration and subtracts it, so resuming picks the breath
  * back up exactly where it was left.
@@ -34,8 +41,6 @@ const SUSPEND_MS = 1000;
 /** Absorbs the float error in `n / step` landing a hair either side of an integer. */
 const EPS = 1e-9;
 
-const now = () => performance.now();
-
 /** The easing the previous build used for the breath — keep it. */
 function ease(p) {
   return 0.5 - Math.cos(Math.PI * p) / 2;
@@ -47,6 +52,50 @@ function endIndexOf(phases, kind) {
   if (index < 0) index = phases.findIndex((p) => p.kind === 'out');
   if (index < 0) index = phases.length - 1;
   return index;
+}
+
+function cycleLength(phases) {
+  return phases.reduce((total, p) => total + p.duration, 0);
+}
+
+/** The instant the ending phase completes, measured from the top of a cycle. */
+function endOffset(phases, kind) {
+  return phases
+    .slice(0, endIndexOf(phases, kind) + 1)
+    .reduce((total, p) => total + p.duration, 0);
+}
+
+/** The rung in force for a cycle starting at `start`: the last at or before it. */
+function rungAt(rungs, start) {
+  let rung = rungs[0];
+  for (const candidate of rungs) {
+    if (candidate.fromSeconds <= start + EPS) rung = candidate;
+    else break;
+  }
+  return rung;
+}
+
+/**
+ * Walk cycles from a known one until the cycle containing `elapsed`.
+ * `from` is `{ k, start, ordinal }` — index, start time and how many phases
+ * came before it. Returns null if a rung has no duration, which would loop.
+ */
+function walk(rungs, elapsed, from = { k: 0, start: 0, ordinal: 0 }) {
+  let { k, start, ordinal } = from;
+  for (;;) {
+    const phases = rungAt(rungs, start).phases;
+    const cycle = cycleLength(phases);
+    if (!(cycle > 0)) return null;
+    if (elapsed < start + cycle) return { k, start, ordinal, phases, cycle };
+    start += cycle;
+    ordinal += phases.length;
+    k += 1;
+  }
+}
+
+function toRungs(config) {
+  if (Array.isArray(config.rungs) && config.rungs.length) return config.rungs;
+  return [{ fromSeconds: 0, phases: config.phases || [] }];
 }
 
 /**
@@ -62,27 +111,49 @@ function endIndexOf(phases, kind) {
  *
  * The engine finishes at this instant and the HUD counts towards it, from the
  * same call — so what is promised and what happens cannot drift apart.
+ *
+ * @param {Array} rungs  `[{ fromSeconds, phases }]`, as from `ladderRungs`
  */
-export function endTimeFor(phases, config) {
-  const cycle = phases.reduce((total, p) => total + p.duration, 0);
-  if (!cycle) return Infinity;
+export function endTimeFor(rungs, config) {
+  if (!Array.isArray(rungs) || rungs.length === 0) return Infinity;
+  const kind = config.endKind || 'out';
+  const round3 = (t) => Math.round(t * 1000) / 1000;
 
-  const armAt = config.mode === 'rounds'
-    ? (config.targetRounds > 0 ? config.targetRounds * cycle : Infinity)
-    : (config.limitSeconds > 0 ? config.limitSeconds : Infinity);
-  if (!Number.isFinite(armAt)) return Infinity;
+  if (config.mode === 'rounds') {
+    if (!(config.targetRounds > 0)) return Infinity;
+    let start = 0;
+    for (let k = 0; ; k += 1) {
+      const phases = rungAt(rungs, start).phases;
+      const cycle = cycleLength(phases);
+      if (!(cycle > 0)) return Infinity;
+      if (k === config.targetRounds - 1) return round3(start + endOffset(phases, kind));
+      start += cycle;
+    }
+  }
 
-  // The instant the ending phase completes, measured from the top of a cycle.
-  const endIndex = endIndexOf(phases, config.endKind || 'out');
-  const endOffset = phases
-    .slice(0, endIndex + 1)
-    .reduce((total, p) => total + p.duration, 0);
-
-  const cycles = Math.max(0, Math.ceil((armAt - endOffset) / cycle - EPS));
-  return Math.round((cycles * cycle + endOffset) * 1000) / 1000;
+  if (!(config.limitSeconds > 0)) return Infinity;
+  let start = 0;
+  for (;;) {
+    const phases = rungAt(rungs, start).phases;
+    const cycle = cycleLength(phases);
+    if (!(cycle > 0)) return Infinity;
+    const candidate = start + endOffset(phases, kind);
+    if (candidate >= config.limitSeconds - EPS) return round3(candidate);
+    start += cycle;
+  }
 }
 
-export function createEngine() {
+/**
+ * @param {object} [deps]  clocks and timers, injectable so tests can drive the
+ *   engine deterministically: `now` (ms, monotonic), `wallNow` (ms, wall),
+ *   `setTimeout`, `clearTimeout`.
+ */
+export function createEngine(deps = {}) {
+  const now = deps.now || (() => performance.now());
+  const wallNow = deps.wallNow || (() => Date.now());
+  const setTimer = deps.setTimeout || ((fn, ms) => setTimeout(fn, ms));
+  const clearTimer = deps.clearTimeout || ((id) => clearTimeout(id));
+
   const handlers = new Map();
   let timer = 0;
   let s = null;
@@ -139,7 +210,7 @@ export function createEngine() {
    */
   function reconcile() {
     if (!s) return;
-    const offset = Date.now() - now();
+    const offset = wallNow() - now();
     const missing = offset - s.wallOffset;
     s.wallOffset = offset;
     if (missing > SUSPEND_MS) s.skew += missing;
@@ -149,29 +220,34 @@ export function createEngine() {
 
   /** Where the breath is at `elapsed`, and how long the current phase has left. */
   function positionAt(elapsed) {
-    const cycleIndex = Math.floor(elapsed / s.cycle);
-    // Clamped because `elapsed - cycleIndex * cycle` can land a hair outside
-    // [0, cycle) on floats, and the scan below assumes it does not.
-    const cyclePos = Math.min(Math.max(elapsed - cycleIndex * s.cycle, 0), s.cycle - EPS);
+    // The walk resumes from the last cycle found whenever time has only moved
+    // forward, which is every tick; it restarts from zero after a resync.
+    const from = s.cache && s.cache.start <= elapsed ? s.cache : undefined;
+    const c = walk(s.rungs, elapsed, from);
+    s.cache = { k: c.k, start: c.start, ordinal: c.ordinal };
+
+    // Clamped because `elapsed - start` can land a hair outside [0, cycle) on
+    // floats, and the scan below assumes it does not.
+    const cyclePos = Math.min(Math.max(elapsed - c.start, 0), c.cycle - EPS);
 
     let index = 0;
     let phaseStart = 0;
     let acc = 0;
-    for (let i = 0; i < s.phases.length; i++) {
-      if (cyclePos < acc + s.phases[i].duration) {
+    for (let i = 0; i < c.phases.length; i++) {
+      if (cyclePos < acc + c.phases[i].duration) {
         index = i;
         phaseStart = acc;
         break;
       }
-      acc += s.phases[i].duration;
+      acc += c.phases[i].duration;
     }
 
-    const phase = s.phases[index];
+    const phase = c.phases[index];
     const phaseElapsed = cyclePos - phaseStart;
 
     return {
       elapsed,
-      cycleIndex,
+      cycleIndex: c.k,
       index,
       phase,
       phaseElapsed,
@@ -179,7 +255,7 @@ export function createEngine() {
       // Absolute across the whole session, so a stall of any length is caught up
       // in one step instead of being missed the way comparing with the last
       // index would miss it.
-      ordinal: cycleIndex * s.phases.length + index
+      ordinal: c.ordinal + index
     };
   }
 
@@ -234,16 +310,14 @@ export function createEngine() {
     // whole number waits a full second rather than firing twice.
     const toDigit = remaining - Math.max(0, Math.ceil(remaining - EPS) - 1);
 
-    let next = Math.min(
+    const next = Math.min(
       s.endTime,
       elapsed + remaining,            // phase boundary
       elapsed + toDigit,              // countdown digit
       Math.floor(elapsed + EPS) + 1   // HUD second
     );
-    // The fine tick, when a listener has asked for one (the ambient sound).
-    if (s.tick > 0) next = Math.min(next, (Math.floor(elapsed / s.tick + EPS) + 1) * s.tick);
 
-    timer = setTimeout(tick, Math.max(0, (next - elapsed) * 1000));
+    timer = setTimer(tick, Math.max(0, (next - elapsed) * 1000));
   }
 
   function tick() {
@@ -258,11 +332,11 @@ export function createEngine() {
 
     if (done) {
       // The phase that just completed, not the one the clock has rolled into.
-      const phase = s.phases[s.endIndex];
+      const last = positionAt(Math.max(0, s.endTime - 1e-6));
       emit('phase', {
-        index: s.endIndex,
-        phase,
-        phaseElapsed: phase.duration,
+        index: last.index,
+        phase: last.phase,
+        phaseElapsed: last.phase.duration,
         isFinal: true,
         initial: false,
         skipped: 0,
@@ -325,37 +399,35 @@ export function createEngine() {
 
   /**
    * @param {object} config
-   * @param {Array}  config.phases        resolved phase list
+   * @param {Array}  [config.rungs]       `[{ fromSeconds, phases }]` — see the
+   *                                      header; from `ladderRungs()`
+   * @param {Array}  [config.phases]      a single-rung session, if no `rungs`
    * @param {string} config.mode          'time' | 'rounds'
    * @param {number} config.limitSeconds  0 = open-ended
    * @param {number} config.targetRounds  0 = open-ended
    * @param {string} config.endKind       phase kind to finish on, default 'out'
-   * @param {number} [config.tick]        extra wake interval in seconds, 0/absent
-   *                                      = none. Only the ambient pad needs one.
    */
   function start(config) {
     stopLoop();
 
-    const { phases } = config;
+    const rungs = toRungs(config);
     s = {
-      phases,
-      cycle: phases.reduce((total, p) => total + p.duration, 0),
-      endIndex: endIndexOf(phases, config.endKind || 'out'),
-      endTime: endTimeFor(phases, config),
+      rungs,
+      endTime: endTimeFor(rungs, config),
       mode: config.mode,
       t0: now(),
-      wallOffset: Date.now() - now(),
+      wallOffset: wallNow() - now(),
       skew: 0,
       pausedAt: 0,
       pausedTotal: 0,
       running: true,
       ordinal: 0,
-      tick: config.tick > 0 ? config.tick : 0
+      cache: null
     };
 
     emit('phase', {
       index: 0,
-      phase: phases[0],
+      phase: rungs[0].phases[0],
       phaseElapsed: 0,
       isFinal: false,
       initial: true,
@@ -368,10 +440,13 @@ export function createEngine() {
   function finish(completed) {
     if (!s) return;
     const elapsed = cappedElapsed();
+    // Completed cycles: the cycle containing the end instant, nudged past a
+    // boundary that lands exactly on it.
+    const at = walk(s.rungs, elapsed + EPS);
     const summary = {
       completed,
       seconds: Math.round(elapsed),
-      rounds: Math.floor(elapsed / s.cycle + EPS),
+      rounds: at ? at.k : 0,
       mode: s.mode
     };
     stopLoop();
@@ -380,7 +455,7 @@ export function createEngine() {
   }
 
   function stopLoop() {
-    if (timer) clearTimeout(timer);
+    if (timer) clearTimer(timer);
     timer = 0;
   }
 
@@ -397,27 +472,36 @@ export function createEngine() {
     s.pausedTotal += now() - s.pausedAt;
     // Whatever the two clocks did to each other while paused is already
     // accounted for by `pausedTotal`; start measuring afresh from here.
-    s.wallOffset = Date.now() - now();
+    s.wallOffset = wallNow() - now();
     s.running = true;
     emit('resume');
     resync();
   }
 
-  // Coming back to the foreground is the only moment the clock can have been
-  // suspended, and — on iOS especially — the only moment a stalled session finds
-  // out how much it missed. Reconcile, then catch up in one step.
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') return;
+  /**
+   * Coming back to the foreground is the only moment the clock can have been
+   * suspended, and — on iOS especially — the only moment a stalled session finds
+   * out how much it missed. Reconcile, then catch up in one step. (Exposed so
+   * tests can call it without a document.)
+   */
+  function foreground() {
     if (!s || !s.running) return;
     reconcile();
     resync();
-  });
+  }
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') foreground();
+    });
+  }
 
   return {
     on,
     start,
     pause,
     resume,
+    foreground,
     /** User-initiated stop. Records the session as not completed. */
     end: () => finish(false),
     /** Tear down without emitting `end` — used when navigating away. */

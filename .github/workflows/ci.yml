@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Syntax-check every module
+        run: |
+          for f in $(git ls-files '*.js' '*.mjs'); do
+            node --check "$f" || exit 1
+          done
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Service worker version bumped with app changes
+        if: github.event_name == 'pull_request'
+        run: node scripts/check-sw-version.mjs "origin/${{ github.base_ref }}"

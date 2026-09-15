@@ -1,0 +1,10 @@
+{
+  "name": "breathe",
+  "private": true,
+  "description": "Breathing exercises PWA. No build step and no dependencies; this file exists for the test runner.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "check": "node scripts/check-sw-version.mjs"
+  }
+}

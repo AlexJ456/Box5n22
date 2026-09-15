@@ -1,5 +1,5 @@
 /**
- * The five breathing protocols.
+ * The breathing protocols.
  *
  * Timings are carried over verbatim from the previous build — do not change
  * them without deciding to change the exercise itself.
@@ -27,6 +27,25 @@ export const PHASE_RGB = {
   wait: [120, 53, 15]
 };
 
+/**
+ * The four slots of the Custom pattern, in breath order, with the range each
+ * accepts. A hold or wait at 0 is left out of the pattern; the breath itself
+ * always has to be there.
+ */
+export const CUSTOM_KINDS = [
+  { key: 'in', name: 'Inhale', kind: 'in', min: 1, max: 20 },
+  { key: 'hold', name: 'Hold', kind: 'hold', min: 0, max: 20 },
+  { key: 'out', name: 'Exhale', kind: 'out', min: 1, max: 20 },
+  { key: 'wait', name: 'Wait', kind: 'wait', min: 0, max: 20 }
+];
+
+/** What the Box ladder may be set to. `to` moves on a half-second grid. */
+export const LADDER_LIMITS = {
+  to: [3.5, 10],
+  steps: [0.5, 1, 2],
+  minutes: [1, 60]
+};
+
 export const EXERCISES = {
   box: {
     id: 'box',
@@ -38,6 +57,9 @@ export const EXERCISES = {
       label: 'Phase time',
       min: 3, max: 6, step: 1, fallback: 4
     },
+    // The only exercise with a ladder: `settings.ladder` can raise phaseTime
+    // step by step over the session. See `ladderRungs`.
+    ladder: true,
     phases: (s) => [
       { name: 'Inhale', kind: 'in', duration: s.phaseTime },
       { name: 'Hold', kind: 'hold', duration: s.phaseTime },
@@ -113,6 +135,20 @@ export const EXERCISES = {
       { name: 'Inhale', kind: 'in', duration: s.coherentTime },
       { name: 'Exhale', kind: 'out', duration: s.coherentTime }
     ]
+  },
+
+  custom: {
+    id: 'custom',
+    name: 'Custom',
+    description: 'Your own pattern',
+    mode: 'time',
+    // No slider: the pattern is four values, edited in its own sheet and kept
+    // in `settings.custom` (sanitized in storage.js against CUSTOM_KINDS).
+    slider: null,
+    custom: true,
+    phases: (s) => CUSTOM_KINDS
+      .filter((slot) => s.custom[slot.key] > 0)
+      .map((slot) => ({ name: slot.name, kind: slot.kind, duration: s.custom[slot.key] }))
   }
 };
 
@@ -139,7 +175,7 @@ export const EXERCISES = {
 })();
 
 /** Display order on the home screen. */
-export const EXERCISE_IDS = ['box', 'boxExtreme', 'fourSevenEight', 'longExhale', 'coherent'];
+export const EXERCISE_IDS = ['box', 'boxExtreme', 'fourSevenEight', 'longExhale', 'coherent', 'custom'];
 
 /** Minute presets for time-based exercises, round presets for 4-7-8. */
 export const TIME_PRESETS = [2, 3, 5, 10, 15, 20];
@@ -173,6 +209,15 @@ export function sliderValue(exercise, settings) {
   return Math.round(Math.min(s.max, Math.max(s.min, snapped)) * 100) / 100;
 }
 
+/** Every value a slider can land on, e.g. [4.5, 5, 5.5, 6] for Coherent. */
+export function sliderSteps(spec) {
+  const out = [];
+  for (let v = spec.min; v <= spec.max + 1e-9; v += spec.step) {
+    out.push(Math.round(v * 100) / 100);
+  }
+  return out;
+}
+
 export function resolve(id, settings) {
   const exercise = getExercise(id);
   if (!exercise.slider) return settings;
@@ -185,6 +230,47 @@ export function getPhases(id, settings) {
 
 export function cycleSeconds(id, settings) {
   return getPhases(id, settings).reduce((total, p) => total + p.duration, 0);
+}
+
+/**
+ * The Box ladder, if it is on and actually goes anywhere:
+ * `{ start, to, step, minutes, steps }`, where `steps` is how many rises it
+ * takes to reach the top. Null for every other exercise, for a ladder that is
+ * off, and for one whose target is not above the starting phase time.
+ */
+export function ladderInfo(id, settings) {
+  const exercise = getExercise(id);
+  const ladder = settings.ladder;
+  if (!exercise.ladder || !ladder || !ladder.on) return null;
+  const start = sliderValue(exercise, settings);
+  const { to, step, minutes } = ladder;
+  if (!(to > start) || !(step > 0) || !(minutes > 0)) return null;
+  return { start, to, step, minutes, steps: Math.ceil((to - start) / step - 1e-9) };
+}
+
+/**
+ * The session as a list of rungs: `[{ fromSeconds, phases }]`, each the phase
+ * list in force for any cycle that *starts* at or after its mark. One rung for
+ * an ordinary session. For a Box ladder, one per rise: the phase time goes up
+ * by `step` every `minutes` minutes and stops at `to`. Rungs are built with
+ * the exercise's own `phases()` directly rather than through `sliderValue`,
+ * which would snap a 4.5s rung back onto Box's whole-second grid.
+ */
+export function ladderRungs(id, settings) {
+  const info = ladderInfo(id, settings);
+  if (!info) return [{ fromSeconds: 0, phases: getPhases(id, settings) }];
+
+  const exercise = getExercise(id);
+  const rungs = [];
+  for (let k = 0; ; k += 1) {
+    const value = Math.min(Math.round((info.start + k * info.step) * 100) / 100, info.to);
+    rungs.push({
+      fromSeconds: k * info.minutes * 60,
+      phases: exercise.phases({ ...settings, [exercise.slider.setting]: value })
+    });
+    if (value >= info.to) break;
+  }
+  return rungs;
 }
 
 /** Drops a trailing `.0` so 4.5 stays "4.5" but 5.0 renders as "5". */
