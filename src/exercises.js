@@ -13,30 +13,16 @@
  * `boxExtreme`), and read it through `endKind()` rather than off the object.
  */
 
-export const PHASE_COLORS = {
-  in: '#f97316',    // inhale
-  hold: '#fbbf24',  // held full — brightest point of the breath
-  out: '#b45309',   // exhale
-  wait: '#78350f'   // held empty — dimmest point of the breath
-};
-
-export const PHASE_RGB = {
-  in: [249, 115, 22],
-  hold: [251, 191, 36],
-  out: [180, 83, 9],
-  wait: [120, 53, 15]
-};
-
 /**
  * The four slots of the Custom pattern, in breath order, with the range each
  * accepts. A hold or wait at 0 is left out of the pattern; the breath itself
  * always has to be there.
  */
 export const CUSTOM_KINDS = [
-  { key: 'in', name: 'Inhale', kind: 'in', min: 1, max: 20 },
-  { key: 'hold', name: 'Hold', kind: 'hold', min: 0, max: 20 },
-  { key: 'out', name: 'Exhale', kind: 'out', min: 1, max: 20 },
-  { key: 'wait', name: 'Wait', kind: 'wait', min: 0, max: 20 }
+  { key: 'in', name: 'Inhale', kind: 'in', min: 1, max: 30 },
+  { key: 'hold', name: 'Hold', kind: 'hold', min: 0, max: 30 },
+  { key: 'out', name: 'Exhale', kind: 'out', min: 1, max: 30 },
+  { key: 'wait', name: 'Wait', kind: 'wait', min: 0, max: 30 }
 ];
 
 /** What the Box ladder may be set to. `to` moves on a half-second grid. */
