@@ -1056,7 +1056,7 @@ input[type="range"]::-moz-range-thumb {
    orb keeps breathing inside it. The corners are kept tight so the dot, which
    runs in straight lines, stays on the track as it turns. */
 .ring--square .ring__track {
-  border-radius: 7%;
+  border-radius: 7%;   /* CORNER_R in ui/ring.js — the dot follows this curve */
   border: 2px solid color-mix(in oklab, var(--c) 75%, transparent);
   box-shadow: 0 0 18px color-mix(in oklab, var(--c) 22%, transparent);
 }
@@ -1066,7 +1066,9 @@ input[type="range"]::-moz-range-thumb {
 
 .ring__tracer {
   position: absolute;
-  inset: 3%;
+  /* On the centre of the track's 2px border, not its outer edge, so the dot
+     sits on the line. The corner radius it follows is CORNER_R in ring.js. */
+  inset: calc(3% + 1px);
   pointer-events: none;
 }
 .ring__tracer-x,

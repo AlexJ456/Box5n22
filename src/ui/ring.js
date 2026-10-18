@@ -89,13 +89,70 @@ const ARC_LEFT = ['rotate(45deg)', 'rotate(45deg)', 'rotate(225deg)'];
 
 /**
  * The square guide: a dot travelling one side of a rounded square per phase,
- * clockwise from the top-left — inhale along the top, hold down the right,
- * exhale along the bottom, wait back up the left. Corner `i` is where phase
- * `i` starts. The dot is carried by two nested full-size boxes, one moved in x
- * and one in y, so a `translate()` of 100% is exactly the side of the square
- * at any size and the travel stays a compositor transform.
+ * clockwise from the bottom-left — inhale up the left, hold along the top,
+ * exhale down the right, wait back along the bottom. The dot is carried by two
+ * nested full-size boxes, one moved in x and one in y, so a `translate()` of
+ * 100% is exactly the side of the square at any size and the travel stays a
+ * compositor transform.
+ *
+ * The corners are rounded, so a straight corner-to-corner move would cut
+ * across each curve. Instead each phase runs from the middle of one corner's
+ * curve to the middle of the next: half an arc, the straight side, half an
+ * arc. The arcs are sampled into keyframes whose offsets are proportional to
+ * distance, so the dot keeps one speed all the way round and lands on the
+ * curve's midpoint exactly at the phase boundary.
  */
-const CORNERS = [[0, 0], [100, 0], [100, 100], [0, 100]];
+
+/** The track's corner radius, % of its side. Mirrors `.ring--square .ring__track`. */
+const CORNER_R = 7;
+/** Keyframes per half-arc. Each step is under 1% of the side — a few pixels. */
+const ARC_STEPS = 6;
+
+/**
+ * Corner `i` is the one phase `i` starts from, in travel order: bottom-left,
+ * top-left, top-right, bottom-right. Each is the centre of its arc; the arc's
+ * midpoint is at 135° + 90°·i (screen coordinates, y down).
+ */
+const CORNER_CENTRES = [
+  [CORNER_R, 100 - CORNER_R],
+  [CORNER_R, CORNER_R],
+  [100 - CORNER_R, CORNER_R],
+  [100 - CORNER_R, 100 - CORNER_R]
+];
+
+const round2 = (v) => Math.round(v * 100) / 100;
+
+/** `{ x, y, offset }` keyframe lists for phase `i`'s stretch of the outline. */
+function sidePath(i) {
+  const points = [];
+  const arc = (corner, fromDeg, toDeg) => {
+    const [cx, cy] = CORNER_CENTRES[corner];
+    for (let k = 0; k <= ARC_STEPS; k += 1) {
+      const a = ((fromDeg + ((toDeg - fromDeg) * k) / ARC_STEPS) * Math.PI) / 180;
+      points.push([cx + CORNER_R * Math.cos(a), cy + CORNER_R * Math.sin(a)]);
+    }
+  };
+  const mid = 135 + 90 * i;
+  arc(i % 4, mid, mid + 45);              // out of this corner's curve
+  arc((i + 1) % 4, mid + 45, mid + 90);   // the straight side, then into the next
+
+  // Offsets by distance travelled, so the speed is constant.
+  const lengths = [0];
+  for (let k = 1; k < points.length; k += 1) {
+    const [x0, y0] = points[k - 1];
+    const [x1, y1] = points[k];
+    lengths.push(lengths[k - 1] + Math.hypot(x1 - x0, y1 - y0));
+  }
+  const total = lengths[lengths.length - 1];
+  return {
+    x: points.map(([x]) => `translateX(${round2(x)}%)`),
+    y: points.map(([, y]) => `translateY(${round2(y)}%)`),
+    offset: lengths.map((l) => l / total)
+  };
+}
+
+/** Built once: the four sides never change, only how long each takes. */
+const SIDES = [0, 1, 2, 3].map(sidePath);
 
 const lerp = ([from, to], t) => from + (to - from) * t;
 
@@ -230,10 +287,9 @@ export function createRing({ showCountdown, square = false, phased = false }) {
       /* ------------------------------------------------------- arc / dot */
 
       if (square) {
-        const [x0, y0] = CORNERS[index % 4];
-        const [x1, y1] = CORNERS[(index + 1) % 4];
-        play(tracerX, { transform: [`translateX(${x0}%)`, `translateX(${x1}%)`] }, durationMs, seekMs, 'linear');
-        play(tracerY, { transform: [`translateY(${y0}%)`, `translateY(${y1}%)`] }, durationMs, seekMs, 'linear');
+        const side = SIDES[index % 4];
+        play(tracerX, { transform: side.x, offset: side.offset }, durationMs, seekMs, 'linear');
+        play(tracerY, { transform: side.y, offset: side.offset }, durationMs, seekMs, 'linear');
       } else {
         play(arcRight, { transform: ARC_RIGHT, offset: ARC_OFFSETS }, durationMs, seekMs, 'linear');
         play(arcLeft, { transform: ARC_LEFT, offset: ARC_OFFSETS }, durationMs, seekMs, 'linear');
