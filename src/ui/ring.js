@@ -34,6 +34,12 @@
  * every mid-phase re-call — a resume, a return from the background — repainted
  * both gradients. Now re-calling it costs nothing but the animations it seeks.
  *
+ * Colour came back once, as an opt-in (settings.phaseColours): `setPhase`
+ * writes the phase kind to `data-phase` and the stylesheet crossfades `--c` to
+ * that phase's colour. That is one attribute write and one ~700ms repaint of the
+ * gradients per phase boundary — never one per frame, and with the option off
+ * it costs nothing at all.
+ *
  * Seeking via `currentTime` is what lets the session catch up exactly after a
  * pause or a spell in the background: the animation is placed at the position
  * the clock says it should be at, rather than restarted from the top.
@@ -55,6 +61,9 @@ const FADE = [0.35, 1];
  * the empty end darkens.
  */
 const ORB_FADE = [0.62, 1];
+/** The square guide's phase-change pulse: the dot swells, a ring bursts off it. */
+const PULSE_MS = 600;
+
 /** Reduced motion holds the orb at a middling size and breathes with light. */
 const REDUCED_SCALE = 0.86;
 
@@ -78,9 +87,26 @@ const ARC_OFFSETS = [0, 0.5, 1];
 const ARC_RIGHT = ['rotate(-135deg)', 'rotate(45deg)', 'rotate(45deg)'];
 const ARC_LEFT = ['rotate(45deg)', 'rotate(45deg)', 'rotate(225deg)'];
 
+/**
+ * The square guide: a dot travelling one side of a rounded square per phase,
+ * clockwise from the top-left — inhale along the top, hold down the right,
+ * exhale along the bottom, wait back up the left. Corner `i` is where phase
+ * `i` starts. The dot is carried by two nested full-size boxes, one moved in x
+ * and one in y, so a `translate()` of 100% is exactly the side of the square
+ * at any size and the travel stays a compositor transform.
+ */
+const CORNERS = [[0, 0], [100, 0], [100, 100], [0, 100]];
+
 const lerp = ([from, to], t) => from + (to - from) * t;
 
-export function createRing({ showCountdown }) {
+/**
+ * @param {object}  options
+ * @param {boolean} options.showCountdown
+ * @param {boolean} [options.square]  the square guide; only meaningful for a
+ *   four-phase pattern, which the caller decides
+ * @param {boolean} [options.phased]  a colour per phase, from the stylesheet
+ */
+export function createRing({ showCountdown, square = false, phased = false }) {
   const glow = el('div', { class: 'ring__glow' });
 
   const track = el('div', { class: 'ring__track' });
@@ -94,14 +120,23 @@ export function createRing({ showCountdown }) {
 
   const orb = el('div', { class: 'ring__orb' });
 
+  const dot = el('div', { class: 'ring__tracer-dot' });
+  const halo = el('div', { class: 'ring__tracer-pulse' });
+  const tracerY = el('div', { class: 'ring__tracer-y' }, [halo, dot]);
+  const tracerX = el('div', { class: 'ring__tracer-x' }, [tracerY]);
+  const tracer = square ? el('div', { class: 'ring__tracer' }, [tracerX]) : null;
+
   const phaseText = el('div', { class: 'ring__phase', 'aria-live': 'polite' });
   const countText = el('div', { class: 'ring__count' });
   countText.hidden = !showCountdown;
 
-  const root = el('div', { class: 'ring', role: 'img' }, [
+  const classes = ['ring'];
+  if (square) classes.push('ring--square');
+  if (phased) classes.push('ring--phased');
+  const root = el('div', { class: classes.join(' '), role: 'img' }, [
     glow,
     track,
-    arc,
+    square ? tracer : arc,
     orb,
     el('div', { class: 'ring__label' }, [phaseText, countText])
   ]);
@@ -111,6 +146,9 @@ export function createRing({ showCountdown }) {
   let lastCount = '';
 
   let running = [];
+  // Kept apart from `running`: a phase seek cancels those, and must not cut a
+  // pulse short.
+  let pulses = [];
 
   function play(node, keyframes, durationMs, seekMs, easing) {
     const anim = node.animate(keyframes, { duration: durationMs, easing, fill: 'both' });
@@ -154,10 +192,15 @@ export function createRing({ showCountdown }) {
      * is equally the way a phase starts, the way a resumed session picks back
      * up, and the way a backgrounded one snaps to where it should be. Calling
      * it twice for the same phase is free and lands in the same place.
+     *
+     * `index` is the phase's place in the cycle, which the square guide needs
+     * to know which side to travel.
      */
-    setPhase(kind, durationMs, seekMs, paused) {
+    setPhase(kind, durationMs, seekMs, paused, index = 0) {
       for (const anim of running) anim.cancel();
       running = [];
+
+      if (phased && root.dataset.phase !== kind) root.dataset.phase = kind;
 
       const [from, to] = FULLNESS[kind] || FULLNESS.wait;
 
@@ -184,12 +227,39 @@ export function createRing({ showCountdown }) {
         }, durationMs, seekMs, BREATH_EASE);
       }
 
-      /* ------------------------------------------------------------- arc */
+      /* ------------------------------------------------------- arc / dot */
 
-      play(arcRight, { transform: ARC_RIGHT, offset: ARC_OFFSETS }, durationMs, seekMs, 'linear');
-      play(arcLeft, { transform: ARC_LEFT, offset: ARC_OFFSETS }, durationMs, seekMs, 'linear');
+      if (square) {
+        const [x0, y0] = CORNERS[index % 4];
+        const [x1, y1] = CORNERS[(index + 1) % 4];
+        play(tracerX, { transform: [`translateX(${x0}%)`, `translateX(${x1}%)`] }, durationMs, seekMs, 'linear');
+        play(tracerY, { transform: [`translateY(${y0}%)`, `translateY(${y1}%)`] }, durationMs, seekMs, 'linear');
+      } else {
+        play(arcRight, { transform: ARC_RIGHT, offset: ARC_OFFSETS }, durationMs, seekMs, 'linear');
+        play(arcLeft, { transform: ARC_LEFT, offset: ARC_OFFSETS }, durationMs, seekMs, 'linear');
+      }
 
       if (paused) setPaused(true);
+    },
+
+    /**
+     * Mark a phase change on the square's dot: it swells and a ring bursts off
+     * it. One-shot transform/opacity animations, so the compositor owns them
+     * like everything else here. Does nothing without the square guide.
+     */
+    pulse() {
+      if (!square) return;
+      for (const anim of pulses) anim.cancel();
+      pulses = [
+        dot.animate(
+          { transform: ['scale(1)', 'scale(1.8)', 'scale(1)'], offset: [0, 0.3, 1] },
+          { duration: PULSE_MS, easing: 'ease-out' }
+        ),
+        halo.animate(
+          { transform: ['scale(1)', 'scale(3.2)'], opacity: [0.9, 0] },
+          { duration: PULSE_MS, easing: 'ease-out' }
+        )
+      ];
     },
 
     setPaused

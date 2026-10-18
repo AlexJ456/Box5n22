@@ -16,22 +16,45 @@
   --ink-2: #fde68a;
   --ink-3: #d97706;
 
-  /* structure */
-  --line: rgba(146, 64, 14, 0.55);      /* #92400e */
-  --line-soft: rgba(146, 64, 14, 0.28);
-  --card: rgba(249, 115, 22, 0.035);
-  --card-active: rgba(249, 115, 22, 0.10);
+  /* structure — the rgb triples feed the rgba() mixes below */
+  --line-rgb: 146, 64, 14;              /* #92400e */
+  --card-rgb: 249, 115, 22;
+  --line: rgba(var(--line-rgb), 0.55);
+  --line-soft: rgba(var(--line-rgb), 0.28);
+  --card: rgba(var(--card-rgb), 0.035);
+  --card-active: rgba(var(--card-rgb), 0.10);
+  --panel: #0d0703;                     /* sheets */
+  --toast-bg: #150c04;
 
   /* controls */
   --ctl-a: #d97706;
   --ctl-b: #b45309;
+  --btn-ink: #1a0e03;                   /* text on a filled button */
   --accent: #f59e0b;
+  --accent-rgb: 245, 158, 11;
   --field: #78350f;
+  --switch-off: #3a2410;
+  --switch-knob: #92400e;
 
   /* the breath: one colour, for the ring, the arc, the label and the dots */
   --ph-inhale: #f97316;
+  --breath-rgb: 249, 115, 22;
   --countdown: #fdba74;
   --complete: #fcd34d;
+  --complete-rgb: 252, 211, 77;
+
+  /* Phase colours (settings.phaseColours). The theme's own hue rotated in even
+     quarter-turns, in OKLCH so all four sit at the same perceived brightness on
+     black whatever the hue — inhale is always the theme's colour, the other
+     three are as far from it and from each other as four colours can be. Each
+     theme only sets --hue (and Mono a softer chroma). */
+  --hue: 47;
+  --phase-l: 0.76;
+  --phase-c: 0.15;
+  --ph-in: oklch(var(--phase-l) var(--phase-c) var(--hue));
+  --ph-hold: oklch(var(--phase-l) var(--phase-c) calc(var(--hue) + 90));
+  --ph-out: oklch(var(--phase-l) var(--phase-c) calc(var(--hue) + 180));
+  --ph-wait: oklch(var(--phase-l) var(--phase-c) calc(var(--hue) + 270));
 
   /* global brightness, 0.25 – 1 */
   --lum: 1;
@@ -47,6 +70,61 @@
 
   --font: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Segoe UI',
     Roboto, Arial, sans-serif;
+}
+
+/* ==========================================================================
+   Themes
+   Each one re-states only the colour tokens above; layout never changes, and
+   the ground stays true black in all of them so OLED dimming still works.
+   Set by `data-theme` on <html>, from settings.theme (see main.js).
+   ========================================================================== */
+
+html[data-theme="ocean"] {
+  --hue: 215;
+  --ink: #e0f2fe; --ink-2: #bae6fd; --ink-3: #0ea5e9;
+  --line-rgb: 7, 89, 133; --card-rgb: 14, 165, 233;
+  --panel: #03090d; --toast-bg: #04111a;
+  --ctl-a: #0ea5e9; --ctl-b: #0284c7; --btn-ink: #031a26;
+  --accent: #38bdf8; --accent-rgb: 56, 189, 248;
+  --field: #0c4a6e; --switch-off: #0f2a3a; --switch-knob: #075985;
+  --ph-inhale: #22d3ee; --breath-rgb: 34, 211, 238;
+  --countdown: #7dd3fc; --complete: #a5f3fc; --complete-rgb: 165, 243, 252;
+}
+
+html[data-theme="forest"] {
+  --hue: 150;
+  --ink: #dcfce7; --ink-2: #bbf7d0; --ink-3: #16a34a;
+  --line-rgb: 22, 101, 52; --card-rgb: 34, 197, 94;
+  --panel: #040d07; --toast-bg: #06140b;
+  --ctl-a: #16a34a; --ctl-b: #15803d; --btn-ink: #04170b;
+  --accent: #4ade80; --accent-rgb: 74, 222, 128;
+  --field: #14532d; --switch-off: #10301c; --switch-knob: #166534;
+  --ph-inhale: #22c55e; --breath-rgb: 34, 197, 94;
+  --countdown: #86efac; --complete: #bef264; --complete-rgb: 190, 242, 100;
+}
+
+html[data-theme="rose"] {
+  --hue: 15;
+  --ink: #ffe4e6; --ink-2: #fecdd3; --ink-3: #e11d48;
+  --line-rgb: 159, 18, 57; --card-rgb: 244, 63, 94;
+  --panel: #0d0306; --toast-bg: #15040a;
+  --ctl-a: #e11d48; --ctl-b: #be123c; --btn-ink: #1a030a;
+  --accent: #fb7185; --accent-rgb: 251, 113, 133;
+  --field: #881337; --switch-off: #3a1019; --switch-knob: #9f1239;
+  --ph-inhale: #f43f5e; --breath-rgb: 244, 63, 94;
+  --countdown: #fda4af; --complete: #fbcfe8; --complete-rgb: 251, 207, 232;
+}
+
+html[data-theme="mono"] {
+  --hue: 260; --phase-c: 0.11;
+  --ink: #f5f5f5; --ink-2: #e5e5e5; --ink-3: #a3a3a3;
+  --line-rgb: 82, 82, 82; --card-rgb: 255, 255, 255;
+  --panel: #0a0a0a; --toast-bg: #111111;
+  --ctl-a: #d4d4d4; --ctl-b: #a3a3a3; --btn-ink: #111111;
+  --accent: #e5e5e5; --accent-rgb: 229, 229, 229;
+  --field: #404040; --switch-off: #262626; --switch-knob: #525252;
+  --ph-inhale: #d4d4d4; --breath-rgb: 212, 212, 212;
+  --countdown: #e5e5e5; --complete: #ffffff; --complete-rgb: 255, 255, 255;
 }
 
 /* ==========================================================================
@@ -321,7 +399,7 @@ h1, h2, h3 { margin: 0; font-weight: 500; letter-spacing: -0.01em; }
   max-width: min(var(--col), 480px);
   margin: 0 auto;
   padding: 8px 20px calc(var(--sab) + 18px);
-  background: #0d0703;
+  background: var(--panel);
   border: 1px solid var(--line);
   border-bottom: none;
   border-radius: 22px 22px 0 0;
@@ -482,7 +560,7 @@ h1, h2, h3 { margin: 0; font-weight: 500; letter-spacing: -0.01em; }
   padding: 0 14px;
   border-radius: 10px;
   background: linear-gradient(to bottom, var(--ctl-a), var(--ctl-b));
-  color: #1a0e03;
+  color: var(--btn-ink);
   font-size: 0.9rem;
   font-weight: 600;
 }
@@ -549,7 +627,7 @@ button:disabled { cursor: default; }
   padding: 0 24px;
   border-radius: var(--r);
   background: linear-gradient(to bottom, var(--ctl-a), var(--ctl-b));
-  color: #1a0e03;
+  color: var(--btn-ink);
   font-size: 1.02rem;
   font-weight: 600;
   letter-spacing: 0.03em;
@@ -629,7 +707,7 @@ button:disabled { cursor: default; }
 }
 .ex[aria-pressed="true"] .ex__pattern {
   color: var(--ph-inhale);
-  border-color: rgba(249, 115, 22, 0.4);
+  border-color: rgba(var(--breath-rgb), 0.4);
 }
 
 /* ==========================================================================
@@ -720,7 +798,7 @@ input[type="range"]::-moz-range-thumb {
 .switch__track {
   position: absolute; inset: 0;
   border-radius: 999px;
-  background: #3a2410;
+  background: var(--switch-off);
   border: 1px solid var(--line-soft);
   transition: background 260ms var(--ease), border-color 260ms var(--ease);
   pointer-events: none;
@@ -731,11 +809,11 @@ input[type="range"]::-moz-range-thumb {
   top: 3px; left: 3px;
   width: 20px; height: 20px;
   border-radius: 50%;
-  background: #92400e;
+  background: var(--switch-knob);
   transition: transform 260ms var(--ease), background 260ms var(--ease);
 }
 .switch input:checked + .switch__track {
-  background: rgba(245, 158, 11, 0.22);
+  background: rgba(var(--accent-rgb), 0.22);
   border-color: var(--accent);
 }
 .switch input:checked + .switch__track::after {
@@ -762,7 +840,7 @@ input[type="range"]::-moz-range-thumb {
   transition: background 200ms var(--ease), color 200ms var(--ease);
 }
 .seg button[aria-pressed="true"] {
-  background: rgba(245, 158, 11, 0.18);
+  background: rgba(var(--accent-rgb), 0.18);
   color: var(--accent);
 }
 .seg button:disabled { opacity: 0.4; cursor: default; }
@@ -852,8 +930,24 @@ input[type="range"]::-moz-range-thumb {
   /* The one colour of the guide, as a hex and as a bare triple for the
      gradients' rgba(). Nothing writes these at runtime. */
   --c: var(--ph-inhale);
-  --c-rgb: 249, 115, 22;
 }
+
+/* Registered so it can be transitioned: with phase colours on, the whole guide
+   crossfades into each phase's colour at the boundary. */
+@property --c {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #f97316;
+}
+
+.ring--phased { transition: --c 700ms ease; }
+.ring--phased[data-phase="in"] { --c: var(--ph-in); }
+.ring--phased[data-phase="hold"] { --c: var(--ph-hold); }
+.ring--phased[data-phase="out"] { --c: var(--ph-out); }
+.ring--phased[data-phase="wait"] { --c: var(--ph-wait); }
+/* The countdown follows too, lifted toward white so it stays the easiest
+   thing on screen to read. */
+.ring--phased .ring__count { color: color-mix(in oklab, var(--c) 65%, white); }
 
 /* The track, and the arc that sweeps round it. Inset so the circle sits where
    the old SVG one did (r = 112 in a 240 box). */
@@ -906,9 +1000,9 @@ input[type="range"]::-moz-range-thumb {
   border: 1px solid var(--c);
   background: radial-gradient(
     circle at 50% 50%,
-    rgba(var(--c-rgb), 0.16) 0%,
-    rgba(var(--c-rgb), 0.05) 55%,
-    rgba(var(--c-rgb), 0) 72%
+    color-mix(in oklab, var(--c) 16%, transparent) 0%,
+    color-mix(in oklab, var(--c) 5%, transparent) 55%,
+    transparent 72%
   );
   opacity: 0.62;
   transform: scale(0.46);
@@ -924,8 +1018,8 @@ input[type="range"]::-moz-range-thumb {
   border-radius: 50%;
   background: radial-gradient(
     circle at 50% 50%,
-    rgba(var(--c-rgb), 0.13) 0%,
-    rgba(var(--c-rgb), 0) 62%
+    color-mix(in oklab, var(--c) 13%, transparent) 0%,
+    transparent 62%
   );
   opacity: 0.35;
   transform: scale(0.7);
@@ -957,6 +1051,76 @@ input[type="range"]::-moz-range-thumb {
   min-height: 1.1em;
 }
 
+/* The square guide (settings.guide = 'square', four-phase patterns only). The
+   arc gives way to a dot that travels one side of the square per phase; the
+   orb keeps breathing inside it. The corners are kept tight so the dot, which
+   runs in straight lines, stays on the track as it turns. */
+.ring--square .ring__track {
+  border-radius: 7%;
+  border: 2px solid color-mix(in oklab, var(--c) 75%, transparent);
+  box-shadow: 0 0 18px color-mix(in oklab, var(--c) 22%, transparent);
+}
+/* 2px, because the orb is scaled to 0.46 at the bottom of a breath and a 1px
+   edge came out under half a pixel. Its animation is untouched. */
+.ring--square .ring__orb { border-radius: 24%; border-width: 2px; }
+
+.ring__tracer {
+  position: absolute;
+  inset: 3%;
+  pointer-events: none;
+}
+.ring__tracer-x,
+.ring__tracer-y {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+}
+.ring__tracer-dot {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border-radius: 50%;
+  background: var(--c);
+  box-shadow: 0 0 12px color-mix(in oklab, var(--c) 80%, transparent);
+  will-change: transform;
+}
+
+/* The ring that bursts out of the dot at a phase change — see ring.pulse(). */
+.ring__tracer-pulse {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border-radius: 50%;
+  border: 2px solid var(--c);
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+/* A session opened from a shortcut link. Audio and speech can only be
+   unlocked by a tap, so it waits for one. */
+.tap-start {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+  color: var(--ink-2);
+  border: 0;
+  font: inherit;
+  font-size: 1.1rem;
+  letter-spacing: 0.2em;
+  text-transform: lowercase;
+  cursor: pointer;
+}
+.tap-start span { color: var(--ink-3); display: block; margin-top: 10px; font-size: 0.8rem; letter-spacing: 0.1em; }
+
 /* ==========================================================================
    Phase dots
    ========================================================================== */
@@ -969,6 +1133,9 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .dot {
+  /* Its own, not inherited: --c is registered, so outside the ring it would
+     otherwise resolve to the registration's initial orange in every theme. */
+  --c: var(--ph-inhale);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -978,17 +1145,23 @@ input[type="range"]::-moz-range-thumb {
 }
 .dot.is-active { opacity: 1; }
 
+/* With phase colours on, each mark shows its own phase's colour: a legend. */
+.dots--phased .dot[data-kind="in"] { --c: var(--ph-in); }
+.dots--phased .dot[data-kind="hold"] { --c: var(--ph-hold); }
+.dots--phased .dot[data-kind="out"] { --c: var(--ph-out); }
+.dots--phased .dot[data-kind="wait"] { --c: var(--ph-wait); }
+
 .dot__mark {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--ph-inhale);
+  background: var(--c);
   transform: scale(1);
   transition: transform 400ms var(--ease), box-shadow 400ms var(--ease);
 }
 .dot.is-active .dot__mark {
   transform: scale(1.5);
-  box-shadow: 0 0 12px var(--ph-inhale);
+  box-shadow: 0 0 12px var(--c);
 }
 
 .dot__label {
@@ -1018,7 +1191,7 @@ input[type="range"]::-moz-range-thumb {
 .done__mark {
   width: 76px; height: 76px;
   border-radius: 50%;
-  border: 1px solid rgba(252, 211, 77, 0.4);
+  border: 1px solid rgba(var(--complete-rgb), 0.4);
   display: grid; place-items: center;
   color: var(--complete);
   margin-bottom: 18px;
@@ -1053,7 +1226,7 @@ input[type="range"]::-moz-range-thumb {
 
 .stats {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 8px;
   margin-bottom: 26px;
 }
@@ -1089,13 +1262,22 @@ input[type="range"]::-moz-range-thumb {
      cell should take its height from its own width. */
   align-items: start;
   gap: 3px;
-  margin-bottom: 26px;
 }
 
 .heat {
   aspect-ratio: 1;
   border-radius: 2px;
-  background: rgba(249, 115, 22, var(--heat, 0.05));
+  background: rgba(var(--breath-rgb), var(--heat, 0.05));
+  cursor: pointer;
+}
+.heat.is-picked { outline: 1px solid var(--accent); outline-offset: 1px; }
+
+.heat-note {
+  min-height: 1.4em;
+  margin: 10px 2px 26px;
+  font-size: 0.8rem;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
 }
 
 .log { display: flex; flex-direction: column; }
@@ -1110,7 +1292,24 @@ input[type="range"]::-moz-range-thumb {
   font-size: 0.88rem;
 }
 .log__item:last-child { border-bottom: none; }
+.log__name { flex: 1; }
 .log__when { color: var(--ink-3); font-size: 0.8rem; }
+.log + .section-label { margin-top: 26px; }
+
+/* Quiet until wanted: a mis-recorded session is the exception. */
+.log__del {
+  align-self: center;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin: -6px -6px -6px 0;
+  border-radius: 50%;
+  color: var(--ink-3);
+  opacity: 0.5;
+}
+.log__del:hover { opacity: 1; }
+.log__del .icon { width: 14px; height: 14px; }
 
 .empty {
   text-align: center;
@@ -1135,7 +1334,7 @@ input[type="range"]::-moz-range-thumb {
   padding: 11px 16px;
   border-radius: 999px;
   border: 1px solid var(--line);
-  background: #150c04;
+  background: var(--toast-bg);
   color: var(--ink-2);
   font-size: 0.85rem;
   opacity: 0;

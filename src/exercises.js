@@ -268,3 +268,26 @@ export function num(value) {
 export function patternLabel(id, settings) {
   return getPhases(id, settings).map((p) => num(p.duration)).join('·');
 }
+
+/**
+ * A session asked for by URL — `?start=box&min=5`, `?start=fourSevenEight&rounds=4`
+ * — as used by the manifest shortcuts. Returns the props for the session view,
+ * or null when the query does not name an exercise this build has. A length
+ * that is missing or unusable means open-ended, as on the home screen.
+ */
+export function parseQuickStart(search) {
+  const params = new URLSearchParams(search || '');
+  const id = params.get('start');
+  if (!id || !Object.prototype.hasOwnProperty.call(EXERCISES, id)) return null;
+
+  const whole = (key) => {
+    const n = Number(params.get(key));
+    return Number.isInteger(n) && n > 0 && n <= 999 ? n : 0;
+  };
+  const rounds = EXERCISES[id].mode === 'rounds';
+  return {
+    exerciseId: id,
+    limitMinutes: rounds ? 0 : whole('min'),
+    targetRounds: rounds ? whole('rounds') : 0
+  };
+}

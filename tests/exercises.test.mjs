@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  EXERCISES, EXERCISE_IDS, getPhases, sliderValue, sliderSteps, ladderInfo, ladderRungs, patternLabel, cycleSeconds
+  EXERCISES, EXERCISE_IDS, getPhases, parseQuickStart, sliderValue, sliderSteps, ladderInfo, ladderRungs, patternLabel, cycleSeconds
 } from '../src/exercises.js';
 import { DEFAULTS } from '../src/storage.js';
 
@@ -62,4 +62,18 @@ test('ladderRungs builds one rung per rise, capped at the target, on the audio-s
   s.ladder = { on: true, to: 9, step: 2, minutes: 3 };
   rungs = ladderRungs('box', s);
   assert.deepEqual(rungs.map((r) => r.phases[0].duration), [4, 6, 8, 9], 'last rise is clipped to the target');
+});
+
+test('parseQuickStart reads a shortcut link and ignores anything it does not know', () => {
+  assert.deepEqual(parseQuickStart('?start=box&min=5'), { exerciseId: 'box', limitMinutes: 5, targetRounds: 0 });
+  assert.deepEqual(parseQuickStart('?start=fourSevenEight&rounds=4'),
+    { exerciseId: 'fourSevenEight', limitMinutes: 0, targetRounds: 4 });
+  assert.deepEqual(parseQuickStart('?start=fourSevenEight&min=5'),
+    { exerciseId: 'fourSevenEight', limitMinutes: 0, targetRounds: 0 }, 'rounds exercise ignores minutes');
+  assert.deepEqual(parseQuickStart('?start=coherent'), { exerciseId: 'coherent', limitMinutes: 0, targetRounds: 0 }, 'open-ended');
+  assert.equal(parseQuickStart('?start=box&min=-3').limitMinutes, 0);
+  assert.equal(parseQuickStart('?start=box&min=2.5').limitMinutes, 0);
+  assert.equal(parseQuickStart('?start=toString'), null, 'not an inherited property');
+  assert.equal(parseQuickStart('?start=nope'), null);
+  assert.equal(parseQuickStart(''), null);
 });

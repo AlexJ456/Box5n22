@@ -13,6 +13,26 @@
   "lang": "en-US",
   "dir": "ltr",
   "prefer_related_applications": false,
+  "shortcuts": [
+    {
+      "name": "Box Breathing · 5 min",
+      "short_name": "Box 5",
+      "url": "./index.html?start=box&min=5",
+      "icons": [{ "src": "icons/icon-192x192.PNG", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "4-7-8 Breathing · 4 rounds",
+      "short_name": "4-7-8",
+      "url": "./index.html?start=fourSevenEight&rounds=4",
+      "icons": [{ "src": "icons/icon-192x192.PNG", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Coherent Breathing · 10 min",
+      "short_name": "Coherent 10",
+      "url": "./index.html?start=coherent&min=10",
+      "icons": [{ "src": "icons/icon-192x192.PNG", "sizes": "192x192", "type": "image/png" }]
+    }
+  ],
   "icons": [
     {
       "src": "icons/icon-192x192.PNG",

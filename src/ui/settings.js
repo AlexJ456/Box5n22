@@ -3,6 +3,20 @@ import { toggle, segmented } from './controls.js';
 import * as audio from '../audio.js';
 import * as haptics from '../haptics.js';
 import * as voice from '../voice.js';
+import { THEMES } from '../storage.js';
+
+/**
+ * Each theme's name is written in its own breath colour, which says more than
+ * a swatch would and fits five across a phone. Mirrors --ph-inhale per theme
+ * in styles.css.
+ */
+const THEME_HUES = {
+  amber: '#f97316',
+  ocean: '#22d3ee',
+  forest: '#22c55e',
+  rose: '#f43f5e',
+  mono: '#d4d4d4'
+};
 
 function row(title, note, control, options = {}) {
   const classes = ['row'];
@@ -103,6 +117,14 @@ export function settings(app) {
           { stack: true }
         ),
         row(
+          'Lead-in',
+          'Count 3, 2, 1 before the first breath',
+          toggle(s.leadIn, (value) => {
+            s.leadIn = value;
+            app.save();
+          })
+        ),
+        row(
           'Countdown',
           'Show the seconds remaining in each phase',
           toggle(s.countdown, (value) => {
@@ -150,6 +172,47 @@ export function settings(app) {
         }
       ),
       dimRow,
+      el('div', { class: 'rows' }, [
+        row(
+          'Theme',
+          null,
+          segmented(
+            THEMES.map((name) => ({
+              value: name,
+              label: el('span', { style: { color: THEME_HUES[name] } },
+                name[0].toUpperCase() + name.slice(1))
+            })),
+            s.theme,
+            (value) => {
+              s.theme = value;
+              app.applyTheme();
+              app.save();
+            },
+            { fill: true }
+          ),
+          { stack: true }
+        ),
+        row(
+          'Phase colours',
+          'Each phase gets its own colour, matched to your theme',
+          toggle(s.phaseColours, (value) => {
+            s.phaseColours = value;
+            app.save();
+          })
+        ),
+        row(
+          'Guide',
+          'Square traces one side per phase — for Box, Box Extreme, and Custom with all four phases',
+          segmented(
+            [{ value: 'orb', label: 'Orb' }, { value: 'square', label: 'Square' }],
+            s.guide,
+            (value) => {
+              s.guide = value;
+              app.save();
+            }
+          )
+        )
+      ]),
 
       el('div', { class: 'footnote' }, [
         el('div', {}, 'Everything is stored on this device only.'),

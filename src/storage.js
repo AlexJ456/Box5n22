@@ -37,11 +37,18 @@ export const DEFAULTS = {
   custom: { in: 4, hold: 4, out: 6, wait: 0 },   // the Custom pattern, seconds; 0 skips a hold
   ladder: { on: false, to: 6, step: 1, minutes: 2 }, // Box only: rise `step`s every `minutes` up to `to`
   countdown: false,
+  leadIn: true,        // a 3-2-1 before the first breath
   haptics: false,
   sleepMode: true,
   brightness: 1,       // 0.25 – 1
-  dimFloor: 0.35       // brightness sleep mode fades down to
+  dimFloor: 0.35,      // brightness sleep mode fades down to
+  theme: 'amber',      // one of THEMES
+  guide: 'orb',        // 'orb' | 'square' — square only for four-phase patterns
+  phaseColours: false  // a colour per phase, derived from the theme's hue
 };
+
+/** Palettes, in the order the settings screen offers them. See styles.css. */
+export const THEMES = ['amber', 'ocean', 'forest', 'rose', 'mono'];
 
 function read(key, fallback) {
   try {
@@ -119,6 +126,8 @@ export function sanitizeSettings(input) {
   settings.dimFloor = clamp(settings.dimFloor, 0.15, 1);
   if (!['off', 'chime', 'ambient', 'voice'].includes(settings.sound)) settings.sound = 'off';
   if (!['list', 'slider'].includes(settings.phaseInput)) settings.phaseInput = 'list';
+  if (!THEMES.includes(settings.theme)) settings.theme = DEFAULTS.theme;
+  if (!['orb', 'square'].includes(settings.guide)) settings.guide = DEFAULTS.guide;
   return settings;
 }
 
@@ -207,6 +216,13 @@ export function recordSession(entry) {
   return trimmed;
 }
 
+/** Remove one session — for a mis-recording. Identified by its timestamp. */
+export function deleteSession(ts) {
+  const list = loadHistory().filter((e) => e.ts !== ts);
+  write(HISTORY_KEY, list);
+  return list;
+}
+
 export function clearHistory() {
   write(HISTORY_KEY, []);
 }
@@ -235,15 +251,43 @@ export function historyStats(list) {
     cursor.setDate(cursor.getDate() - 1);
   }
 
+  // Longest run anywhere in the history, walked the same way: by calendar
+  // day from each run's first day, never by 24-hour steps.
+  let longest = 0;
+  for (const key of days) {
+    const d = new Date(`${key}T12:00:00`);
+    d.setDate(d.getDate() - 1);
+    if (days.has(dayKey(d.getTime()))) continue; // not the start of a run
+    let run = 0;
+    for (const c = new Date(`${key}T12:00:00`); days.has(dayKey(c.getTime())); c.setDate(c.getDate() + 1)) {
+      run += 1;
+    }
+    longest = Math.max(longest, run);
+  }
+
   const DAY = 86400000;
   const weekAgo = Date.now() - 7 * DAY;
   const thisWeek = list.filter((e) => e.ts >= weekAgo).length;
+
+  // Today and the last seven days, in seconds — for the completion screen.
+  const todayKey = dayKey(Date.now());
+  const todaySeconds = list.filter((e) => dayKey(e.ts) === todayKey).reduce((sum, e) => sum + e.seconds, 0);
+  const weekSeconds = list.filter((e) => e.ts >= weekAgo).reduce((sum, e) => sum + e.seconds, 0);
+
+  // exercise id -> seconds, most-breathed first.
+  const perExercise = new Map();
+  for (const e of list) perExercise.set(e.exercise, (perExercise.get(e.exercise) || 0) + e.seconds);
+  const byExercise = [...perExercise].sort((a, b) => b[1] - a[1]);
 
   return {
     sessions: list.length,
     totalMinutes: Math.round(totalSeconds / 60),
     streak,
+    longest,
     thisWeek,
+    todaySeconds,
+    weekSeconds,
+    byExercise,
     days
   };
 }

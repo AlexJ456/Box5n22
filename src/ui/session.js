@@ -9,6 +9,8 @@ import { recordSession } from '../storage.js';
 import { endTimeFor } from '../engine.js';
 
 const SLEEP_DELAY = 20000;
+/** Seconds of "get ready" before the first breath, when settings.leadIn is on. */
+const LEAD_IN = 3;
 
 export function session(app, props) {
   const { settings } = app;
@@ -35,6 +37,9 @@ export function session(app, props) {
   const endsAt = endTimeFor(rungs, config);
   const targetRounds = config.targetRounds;
   const isRounds = exercise.mode === 'rounds';
+  // A ladder changes the phase time mid-session, and the HUD says so; with
+  // every phase of a Box cycle the same length, any phase's duration will do.
+  const laddered = rungs.length > 1;
 
   /* ---------------------------------------------------------------- chrome */
 
@@ -46,15 +51,20 @@ export function session(app, props) {
   );
   const hud = el('div', { class: 'hud' }, [hudTime, endBtn]);
 
-  const ring = createRing({ showCountdown: settings.countdown });
+  // The square only makes sense with a side per phase.
+  const ring = createRing({
+    showCountdown: settings.countdown,
+    square: settings.guide === 'square' && phases.length === 4,
+    phased: settings.phaseColours
+  });
 
   const dots = phases.map((phase) =>
-    el('div', { class: 'dot' }, [
+    el('div', { class: 'dot', 'data-kind': phase.kind }, [
       el('div', { class: 'dot__mark' }),
       el('div', { class: 'dot__label' }, phase.name)
     ])
   );
-  const dotRow = el('div', { class: 'dots' }, dots);
+  const dotRow = el('div', { class: settings.phaseColours ? 'dots dots--phased' : 'dots' }, dots);
 
   const stage = el('div', { class: 'session__stage' }, [ring.el, dotRow]);
 
@@ -94,6 +104,17 @@ export function session(app, props) {
 
   function onKey(event) {
     wake();
+    // Before the first breath — the tap-to-begin screen or the lead-in — there
+    // is nothing to pause. Space and Enter answer the tap screen; Esc leaves.
+    if (!engine.active) {
+      if (event.key === 'Escape') {
+        stop();
+      } else if (tapScreen && (event.key === 'Enter' || event.code === 'Space' || event.key === ' ')) {
+        event.preventDefault();
+        tapToBegin();
+      }
+      return;
+    }
     if (event.code === 'Space' || event.key === ' ') {
       event.preventDefault();
       togglePause();
@@ -121,11 +142,12 @@ export function session(app, props) {
   function onFrame(f) {
     if (settings.countdown) ring.setCountdown(num(f.countdown));
 
-    const label = isRounds
+    const base = isRounds
       ? `Round ${Math.min(f.rounds + 1, targetRounds || f.rounds + 1)}${targetRounds ? ` of ${targetRounds}` : ''}`
       : Number.isFinite(endsAt)
         ? `${mmss(f.seconds)} / ${mmss(endsAt)}`
         : mmss(f.seconds);
+    const label = laddered ? `${base} · ${num(f.phase.duration)}s` : base;
     if (label !== lastHud) {
       lastHud = label;
       hudTime.textContent = label;
@@ -146,7 +168,7 @@ export function session(app, props) {
     // Seeked, not restarted — this is equally a phase starting, a resumed
     // session picking back up, and a backgrounded one snapping to where the
     // clock says it should be.
-    ring.setPhase(phase.kind, phase.duration * 1000, phaseElapsed * 1000, engine.paused);
+    ring.setPhase(phase.kind, phase.duration * 1000, phaseElapsed * 1000, engine.paused, index);
     dots.forEach((dot, i) => dot.classList.toggle('is-active', i === index));
 
     // `initial` opens the session, `resynced` is it coming back from a pause or
@@ -154,6 +176,10 @@ export function session(app, props) {
     // it was away. None has earned a cue — otherwise a couple of minutes in
     // another app come back as a burst of chimes.
     const crossed = !initial && !resynced && skipped === 0;
+
+    // The square's dot marks the start and every corner, but — like the chime
+    // — never a resume or a catch-up from the background.
+    if (crossed || initial) ring.pulse();
 
     // The pad gets every phase event, cue or not: it has to be seeked exactly
     // like the ring. Only a crossed boundary earns the swell.
@@ -216,9 +242,20 @@ export function session(app, props) {
 
   function onVisibility() {
     if (document.visibilityState === 'hidden') {
+      // A lead-in left running would start the session in the background.
+      // Drop it, and count it in again from the top on the way back.
+      if (leadTimer) {
+        clearTimeout(leadTimer);
+        leadTimer = 0;
+        leadAway = true;
+        return;
+      }
       if (!engine.active || engine.paused) return;
       pauseSession();
       pausedAway = true;
+    } else if (leadAway) {
+      leadAway = false;
+      begin();
     } else if (pausedAway) {
       pausedAway = false;
       wake();
@@ -228,9 +265,14 @@ export function session(app, props) {
 
   document.addEventListener('visibilitychange', onVisibility);
 
-  /** User-initiated stop. The engine records it as an incomplete session. */
+  /**
+   * User-initiated stop. The engine records it as an incomplete session — or,
+   * before the first breath, there is nothing to record and it is just a way
+   * back.
+   */
   function stop() {
-    engine.end();
+    if (engine.active) engine.end();
+    else app.go('home');
   }
 
   /* ----------------------------------------------------------------- start */
@@ -247,13 +289,72 @@ export function session(app, props) {
     app.toast('Low Power Mode — your screen may sleep');
   }
 
+  /**
+   * A short count-in, so the first inhale is not the instant the button is
+   * let go. Shown on the ring itself; nothing is recorded until it is over.
+   */
+  let leadTimer = 0;
+  let leadAway = false;
+
+  function begin() {
+    if (!settings.leadIn) {
+      engine.start(config);
+      return;
+    }
+    primaryBtn.disabled = true;
+    ring.setPhaseName('Get ready');
+    ring.showCountdown(true);
+    let n = LEAD_IN;
+    const step = () => {
+      if (n === 0) {
+        leadTimer = 0;
+        primaryBtn.disabled = false;
+        ring.showCountdown(settings.countdown);
+        engine.start(config);
+        return;
+      }
+      ring.setCountdown(String(n));
+      n -= 1;
+      leadTimer = setTimeout(step, 1000);
+    };
+    step();
+  }
+
+  /**
+   * Opened from a shortcut link, nothing has been tapped yet, and neither the
+   * AudioContext nor speech will start without a tap — Safari hands back a
+   * context that never runs. So the link lands on one full-screen button.
+   */
+  let tapScreen = null;
+
+  function unlockSound() {
+    audio.unlock();
+    if (settings.sound === 'voice') voice.prime();
+  }
+
+  function tapToBegin() {
+    if (!tapScreen) return;
+    tapScreen.remove();
+    tapScreen = null;
+    unlockSound();
+    begin();
+  }
+
   audio.setMode(settings.sound);
-  audio.unlock();
   haptics.setEnabled(settings.haptics);
   wakelock.request(onWakeLockDenied);
   wake();
 
-  engine.start(config);
+  if (props.tapToStart) {
+    tapScreen = el('button', { class: 'tap-start', type: 'button', onclick: tapToBegin }, [
+      el('div', {}, [exercise.name, el('span', {}, 'tap to begin')])
+    ]);
+    root.append(tapScreen);
+  } else {
+    // Already inside the Start tap from the home screen.
+    unlockSound();
+    begin();
+  }
 
   return {
     el: root,
@@ -261,6 +362,7 @@ export function session(app, props) {
       off.forEach((fn) => fn());
       engine.dispose();
       clearTimeout(sleepTimer);
+      clearTimeout(leadTimer);
       window.removeEventListener('keydown', onKey);
       document.removeEventListener('visibilitychange', onVisibility);
       audio.stop();

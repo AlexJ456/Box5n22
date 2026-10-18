@@ -556,7 +556,44 @@ export function home(app) {
     });
   }
 
+  /* -------------------------------------------------------------- keyboard */
+
+  /**
+   * For the desktop installs: Enter starts, the arrows walk the list, `,` and
+   * `h` open settings and history. Left alone while a sheet is open (it has its
+   * own keys) and while a modifier is held, so browser shortcuts still work.
+   * Enter on a focused button is the button's own click, not a start.
+   */
+  function onKey(event) {
+    if (document.querySelector('.sheet.is-open')) return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    const target = event.target;
+    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
+
+    if (event.key === 'Enter') {
+      if (target && target.tagName === 'BUTTON' && target !== document.body) return;
+      event.preventDefault();
+      start();
+    } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const i = EXERCISE_IDS.indexOf(settings.exercise);
+      const step = event.key === 'ArrowDown' ? 1 : -1;
+      selectExercise(EXERCISE_IDS[(i + step + EXERCISE_IDS.length) % EXERCISE_IDS.length]);
+    } else if (event.key === ',') {
+      app.go('settings');
+    } else if (event.key === 'h' || event.key === 'H') {
+      app.go('history');
+    }
+  }
+
+  window.addEventListener('keydown', onKey);
+
   renderAll();
 
-  return { el: root };
+  return {
+    el: root,
+    destroy() {
+      window.removeEventListener('keydown', onKey);
+    }
+  };
 }

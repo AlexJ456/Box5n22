@@ -6,7 +6,7 @@ import { fakeStorage, freezeDate } from './helpers.mjs';
 
 globalThis.localStorage = fakeStorage();
 const storage = await import('../src/storage.js');
-const { sanitizeSettings, DEFAULTS, historyStats, heatmapData, dayKey, mergeHistory, parseBackup, recordSession, loadHistory } = storage;
+const { sanitizeSettings, DEFAULTS, historyStats, heatmapData, dayKey, mergeHistory, parseBackup, recordSession, loadHistory, deleteSession } = storage;
 
 test('sanitizeSettings fills, types, clamps, and rebuilds the object-valued settings', () => {
   const s = sanitizeSettings({
@@ -95,4 +95,50 @@ test('parseBackup accepts the current format and the old bare array, and explain
   assert.equal(ok.history.length, 1);
   assert.equal(ok.settings.sound, 'chime');
   assert.deepEqual(parseBackup('[{"ts":5,"seconds":10}]'), { history: [{ ts: 5, seconds: 10 }], settings: null });
+});
+
+test('theme, guide and lead-in are validated against what the app offers', () => {
+  assert.equal(sanitizeSettings({}).theme, 'amber');
+  assert.equal(sanitizeSettings({ theme: 'ocean' }).theme, 'ocean');
+  assert.equal(sanitizeSettings({ theme: 'neon' }).theme, 'amber');
+  assert.equal(sanitizeSettings({ guide: 'square' }).guide, 'square');
+  assert.equal(sanitizeSettings({ guide: 'hexagon' }).guide, 'orb');
+  assert.equal(sanitizeSettings({}).leadIn, true);
+  assert.equal(sanitizeSettings({ leadIn: false }).leadIn, false);
+  assert.equal(sanitizeSettings({ leadIn: 'no' }).leadIn, true);
+  assert.equal(sanitizeSettings({}).phaseColours, false);
+  assert.equal(sanitizeSettings({ phaseColours: true }).phaseColours, true);
+  assert.equal(sanitizeSettings({ phaseColours: 1 }).phaseColours, false);
+});
+
+test('deleteSession removes exactly the one session', () => {
+  localStorage.clear();
+  const a = { ts: 1000, exercise: 'box', seconds: 120, rounds: 2, completed: true };
+  const b = { ts: 2000, exercise: 'coherent', seconds: 60, rounds: 0, completed: false };
+  localStorage.setItem('breathe.history.v1', JSON.stringify([a, b]));
+  assert.deepEqual(deleteSession(1000).map((e) => e.ts), [2000]);
+  assert.deepEqual(loadHistory().map((e) => e.ts), [2000]);
+  assert.equal(deleteSession(12345).length, 1, 'an unknown session changes nothing');
+});
+
+test('historyStats finds the longest run, today, the week and the per-exercise split', () => {
+  const now = new Date(2025, 5, 20, 18, 0, 0).getTime();
+  const restore = freezeDate(now);
+  try {
+    const day = (n, ex = 'box', seconds = 60) => {
+      const d = new Date(now); d.setDate(d.getDate() - n); d.setHours(9);
+      return { ts: d.getTime(), exercise: ex, seconds, rounds: 0, completed: true };
+    };
+    // A five-day run long ago, a two-day run ending today.
+    const list = [day(15), day(14), day(13), day(12), day(11), day(1, 'coherent', 300), day(0, 'box', 120), day(0, 'coherent', 30)];
+    const s = historyStats(list);
+    assert.equal(s.longest, 5);
+    assert.equal(s.streak, 2);
+    assert.equal(s.todaySeconds, 150);
+    assert.equal(s.weekSeconds, 450);
+    assert.deepEqual(s.byExercise, [['box', 420], ['coherent', 330]]);
+    assert.equal(historyStats([]).longest, 0);
+  } finally {
+    restore();
+  }
 });

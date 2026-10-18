@@ -5,6 +5,8 @@ import {
   historyStats,
   heatmapData,
   clearHistory,
+  deleteSession,
+  dayKey,
   exportBackup,
   parseBackup,
   mergeHistory,
@@ -141,32 +143,81 @@ export function history(app) {
 
     const s = historyStats(list);
 
-    const cells = heatmapData(list).map((cell) =>
-      el('div', {
+    // A `title` tooltip never shows on a touch screen, so a day is tapped
+    // instead, and read back in the line under the grid.
+    const dayNote = el('div', { class: 'heat-note' }, 'Tap a day to see it');
+    let picked = null;
+
+    function showDay(cell, node) {
+      if (picked) picked.classList.remove('is-picked');
+      picked = node;
+      node.classList.add('is-picked');
+      const key = dayKey(cell.ts);
+      const count = list.filter((e) => dayKey(e.ts) === key).length;
+      const date = new Date(cell.ts).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+      dayNote.textContent = count === 0
+        ? `${date} — nothing`
+        : `${date} — ${count} ${count === 1 ? 'session' : 'sessions'} · ${mmss(cell.seconds)}`;
+    }
+
+    const cells = heatmapData(list).map((cell) => {
+      const node = el('div', {
         class: 'heat',
-        style: { '--heat': cell.future ? 0.02 : intensity(cell.seconds) },
-        title: `${new Date(cell.ts).toLocaleDateString()} — ${Math.round(cell.seconds / 60)} min`
-      })
-    );
+        style: { '--heat': cell.future ? 0.02 : intensity(cell.seconds) }
+      });
+      if (!cell.future) node.addEventListener('click', () => showDay(cell, node));
+      return node;
+    });
 
     const recent = list
       .slice(-RECENT_SHOWN)
       .reverse()
       .map((entry) =>
         el('div', { class: 'log__item' }, [
-          el('div', {}, getExercise(entry.exercise).name),
-          el('div', { class: 'log__when' }, `${relative(entry.ts)} · ${mmss(entry.seconds)}`)
+          el('div', { class: 'log__name' }, getExercise(entry.exercise).name),
+          el('div', { class: 'log__when' }, `${relative(entry.ts)} · ${mmss(entry.seconds)}`),
+          el(
+            'button',
+            {
+              class: 'log__del',
+              type: 'button',
+              'aria-label': 'Delete session',
+              onclick: () => {
+                if (!confirm(`Delete this ${getExercise(entry.exercise).name} session?`)) return;
+                list = deleteSession(entry.ts);
+                render();
+              }
+            },
+            [icon('close')]
+          )
         ])
       );
+
+    // Minutes per exercise, most-breathed first. Only worth a section once
+    // there is more than one exercise to compare.
+    const breakdown = s.byExercise.length > 1
+      ? [
+        el('div', { class: 'section-label' }, 'By exercise'),
+        el('div', { class: 'log' }, s.byExercise.map(([id, seconds]) =>
+          el('div', { class: 'log__item' }, [
+            el('div', { class: 'log__name' }, getExercise(id).name),
+            el('div', { class: 'log__when' }, `${Math.max(1, Math.round(seconds / 60))} min`)
+          ])
+        ))
+      ]
+      : [];
 
     body.replaceChildren(
       el('div', { class: 'stats' }, [
         stat(s.streak, 'day streak'),
+        stat(s.longest, 'best streak'),
         stat(s.totalMinutes, 'minutes'),
         stat(s.sessions, 'sessions')
       ]),
       el('div', { class: 'section-label' }, 'Last 12 weeks'),
       el('div', { class: 'heatmap' }, cells),
+      dayNote,
+      ...breakdown,
       el('div', { class: 'section-label' },
         list.length > RECENT_SHOWN ? `Recent · ${RECENT_SHOWN} of ${list.length}` : 'Recent'),
       el('div', { class: 'log' }, recent),

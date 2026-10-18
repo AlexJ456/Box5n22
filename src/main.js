@@ -1,6 +1,7 @@
 import { el, clear } from './dom.js';
 import { loadSettings, saveSettings } from './storage.js';
 import { createEngine } from './engine.js';
+import { parseQuickStart } from './exercises.js';
 import * as audio from './audio.js';
 import * as haptics from './haptics.js';
 
@@ -27,6 +28,7 @@ const app = {
   go,
   save: () => saveSettings(settings),
   setBrightness,
+  applyTheme,
   toast
 };
 
@@ -87,6 +89,11 @@ function setBrightness(value) {
   appEl.style.setProperty('--lum', String(value));
 }
 
+/** The palette lives in styles.css under `html[data-theme]`. */
+function applyTheme() {
+  document.documentElement.dataset.theme = settings.theme;
+}
+
 /* --------------------------------------------------------------- toast --- */
 
 let toastTimer = 0;
@@ -133,9 +140,24 @@ document.addEventListener('visibilitychange', () => {
 /* ------------------------------------------------------------------ boot - */
 
 setBrightness(settings.brightness);
+applyTheme();
 audio.setMode(settings.sound);
 haptics.setEnabled(settings.haptics);
-go('home');
+
+// A shortcut link (`?start=box&min=5`, see manifest.json) opens straight into
+// that session. The query is dropped from the address first, so a reload or a
+// later launch of the same window comes back to the home screen instead of
+// starting the session again. The exercise is selected as if picked by hand;
+// the remembered lengths are left alone.
+const quick = parseQuickStart(window.location.search);
+if (quick) {
+  window.history.replaceState(null, '', window.location.pathname + window.location.hash);
+  settings.exercise = quick.exerciseId;
+  saveSettings(settings);
+  go('session', { ...quick, tapToStart: true });
+} else {
+  go('home');
+}
 
 /* --------------------------------------------------------- service worker  */
 
